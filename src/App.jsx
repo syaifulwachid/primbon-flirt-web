@@ -165,8 +165,8 @@ export default function App() {
   });
 
   // Pengaturan Sumber AI & Gemini Free Tier
-  const [aiMode, setAiMode] = useState(() => localStorage.getItem('AURAMATCH_AI_MODE') || 'local');
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('AURAMATCH_GEMINI_KEY') || '');
+  const [aiMode, setAiMode] = useState(() => localStorage.getItem('AURAMATCH_AI_MODE') || 'hybrid_gemini');
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('AURAMATCH_GEMINI_KEY') || (import.meta.env.VITE_GEMINI_API_KEY || ''));
   const [geminiDailyLimit, setGeminiDailyLimit] = useState(() => Number(localStorage.getItem('AURAMATCH_GEMINI_LIMIT')) || 50);
   const [geminiUsageCount, setGeminiUsageCount] = useState(() => getGeminiUsage());
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
@@ -1412,7 +1412,7 @@ export default function App() {
                             setGeminiApiKey(e.target.value);
                             localStorage.setItem('AURAMATCH_GEMINI_KEY', e.target.value);
                           }}
-                          placeholder="Masukkan API Key Gemini (misal: AIzaSy...)"
+                          placeholder="Masukkan API Key Gemini (misal: AQ.Ab8... atau AIzaSy...)"
                           className="w-full bg-[#140f24] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
                         />
                       </div>

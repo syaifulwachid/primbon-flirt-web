@@ -1,6 +1,6 @@
 /**
  * Engine Integrasi Google Gemini AI API (Hybrid Mode)
- * Menyediakan balasan Generative AI sejati dengan pemetaan model otomatis (gemini-flash-latest, gemini-2.5-flash)
+ * Menyediakan balasan Generative AI sejati dengan pemetaan model otomatis (Gemini 3.1 & 3.5 series)
  * dan Perlindungan Kuota Free Tier.
  */
 
@@ -39,16 +39,40 @@ function incrementGeminiUsage() {
 
 /**
  * Temukan nama model aktif yang didukung oleh API Key
+ * Mendukung format API key Google AI Studio terbaru (dimulai dengan AQ...)
  */
 async function getActiveGeminiModel(cleanKey) {
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`, {
+      headers: {
+        'x-goog-api-key': cleanKey
+      }
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.models && Array.isArray(data.models)) {
+        // Model modern tercepat dan hemat kuota Free Tier (Gemini 3.1 & 3.5 series)
+        const preferred = [
+          'gemini-3.1-flash-lite',
+          'gemini-3.5-flash-lite',
+          'gemini-flash-lite-latest',
+          'gemini-3.5-flash',
+          'gemini-3.1-flash',
+          'gemini-flash-latest'
+        ];
+        for (const pref of preferred) {
+          if (data.models.some(m => m.name === `models/${pref}`)) {
+            return pref;
+          }
+        }
+
+        // Model fallback yang mendukung generateContent
         const found = data.models.find(m =>
           m.supportedGenerationMethods &&
           m.supportedGenerationMethods.includes('generateContent') &&
+          !m.name.includes('tts') &&
+          !m.name.includes('image') &&
+          !m.name.includes('transcribe') &&
           (m.name.includes('flash') || m.name.includes('pro'))
         );
         if (found && found.name) {
@@ -59,7 +83,7 @@ async function getActiveGeminiModel(cleanKey) {
   } catch (e) {
     console.warn('Model list fetch fallback:', e.message);
   }
-  return 'gemini-flash-latest';
+  return 'gemini-3.1-flash-lite';
 }
 
 /**
@@ -125,16 +149,20 @@ SYARAT MUTLAK:
 - HANYA kembalikan JSON array valid tanpa teks markdown atau penjelasan ekstra.
 `;
 
-  // Temukan nama model aktif yang tersedia untuk API Key ini
+  // Temukan nama model aktif yang didukung oleh API Key
   const activeModel = await getActiveGeminiModel(cleanKey);
 
+  // Kandidat model yang diurutkan dari yang paling optimal & aktif untuk Google AI Studio 2026
   const candidateModels = [
     activeModel,
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash',
+    'gemini-3.1-flash',
     'gemini-flash-latest',
-    'gemini-2.5-flash',
-    'gemini-pro-latest',
-    'gemini-1.5-flash'
-  ];
+    'gemini-2.5-flash-lite'
+  ].filter((v, i, a) => v && a.indexOf(v) === i);
 
   const apiVersions = ['v1beta', 'v1'];
   let lastErrorMsg = '';
@@ -149,7 +177,10 @@ SYARAT MUTLAK:
 
         const response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey
+          },
           body: JSON.stringify({
             contents: [{
               parts: [{ text: prompt }]
@@ -164,11 +195,16 @@ SYARAT MUTLAK:
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           lastErrorMsg = errorData.error?.message || `HTTP ${response.status}`;
-          if (response.status === 404 || (lastErrorMsg && (lastErrorMsg.includes('not found') || lastErrorMsg.includes('not supported')))) {
-            continue;
-          } else {
-            throw new Error(lastErrorMsg);
+
+          // Jika API key secara permanen ditolak
+          if (response.status === 400 && (lastErrorMsg.includes('API key not valid') || lastErrorMsg.includes('API_KEY_INVALID'))) {
+            throw new Error('API Key Google Gemini tidak valid. Silakan periksa kembali API Key Anda.');
           }
+
+          // Jika model deprecated (404), kuota per-model habis (429), atau server sibuk (503):
+          // Lanjutkan ke kandidat model berikutnya tanpa langsung gagal!
+          console.warn(`Gemini model ${modelName} (${apiVer}) [HTTP ${response.status}]: ${lastErrorMsg}. Mencoba model alternatif...`);
+          continue;
         }
 
         const data = await response.json();
@@ -179,7 +215,7 @@ SYARAT MUTLAK:
         }
 
         // Parse JSON Array
-        let cleanJson = textOutput.replace(/```json/g, '').replace(/```/g, '').trim();
+        let cleanJson = textOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
 
         const jsonMatch = cleanJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
         if (jsonMatch) {
@@ -197,6 +233,7 @@ SYARAT MUTLAK:
         if (e.message && (e.message.includes('API key not valid') || e.message.includes('API_KEY_INVALID'))) {
           throw new Error('API Key Google Gemini tidak valid. Silakan periksa kembali API Key Anda.');
         }
+        console.warn(`Error trying ${modelName}:`, e.message);
       }
     }
   }
