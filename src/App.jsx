@@ -5,11 +5,13 @@ import {
   Compass, Gift, AlertTriangle, BookOpen, User, Calendar,
   ArrowRight, CheckCircle2, ChevronRight, Zap, Target,
   ChevronDown, ChevronUp, SlidersHorizontal, Share2, Plus,
-  Trash2, Bell, BellRing, Eye, Sparkle
+  Trash2, Bell, BellRing, Eye, Sparkle, QrCode, RefreshCw,
+  Cpu, CheckCheck
 } from 'lucide-react';
 import { calculateWeton, calculateMatch, calculateDailyTiming, LAKUNING_MAP } from './engine/primbon';
 import { CHAT_STAGES, SITUATION_MODES, getChatRecommendation, getGiftConsultation } from './engine/ronaldFrank';
 import { calculateNameNumerology, calculatePersonalDay } from './engine/numerology';
+import { analyzeIncomingMessage } from './engine/nlpCopilot';
 
 // Data Default Awal
 const DEFAULT_USER = {
@@ -80,13 +82,20 @@ export default function App() {
   const [notificationPermission, setNotificationPermission] = useState('default');
   const [notificationToast, setNotificationToast] = useState(null);
 
-  // Tab Nav: 'match' | 'timing' | 'scripts' | 'numerology' | 'playbook'
+  // Tab Nav: 'match' | 'numerology' | 'timing' | 'scripts' | 'wa_monitor' | 'playbook'
   const [activeTab, setActiveTab] = useState('match');
 
   // Script Generator State
   const [selectedStage, setSelectedStage] = useState('opener');
   const [selectedSituation, setSelectedSituation] = useState('normal');
   const [copiedText, setCopiedText] = useState(null);
+
+  // WhatsApp & NLP Copilot States
+  const [incomingChatInput, setIncomingChatInput] = useState('Hahaha iya nih, lagi capek bgt sama deadline kantor');
+  const [analyzedChatResult, setAnalyzedChatResult] = useState(null);
+  const [isWsConnected, setIsWsConnected] = useState(false);
+  const [wsQR, setWsQR] = useState(null);
+  const [showQRModal, setShowQRModal] = useState(false);
 
   // Hasil Kalkulasi
   const [userWeton, setUserWeton] = useState(null);
@@ -160,6 +169,50 @@ export default function App() {
       setScriptData(rec);
     }
   }, [targetWeton, selectedStage, selectedSituation]);
+
+  // Evaluasi awal NLP Copilot
+  useEffect(() => {
+    if (incomingChatInput && targetWeton && numerologyData && personalDayData) {
+      const analysis = analyzeIncomingMessage(incomingChatInput, targetWeton, numerologyData, personalDayData);
+      setAnalyzedChatResult(analysis);
+    }
+  }, [incomingChatInput, targetWeton, numerologyData, personalDayData]);
+
+  // WebSocket Listener ke WhatsApp Server Lokal (port 4000)
+  useEffect(() => {
+    let ws = null;
+    try {
+      ws = new WebSocket('ws://localhost:4000');
+      ws.onopen = () => {
+        setIsWsConnected(true);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'qr') {
+            setWsQR(data.qr);
+          } else if (data.type === 'status') {
+            setIsWsConnected(data.isConnected);
+            if (data.isConnected) setWsQR(null);
+          } else if (data.type === 'new_message') {
+            setIncomingChatInput(data.text);
+          }
+        } catch {}
+      };
+      ws.onerror = () => {
+        setIsWsConnected(false);
+      };
+      ws.onclose = () => {
+        setIsWsConnected(false);
+      };
+    } catch {
+      setIsWsConnected(false);
+    }
+
+    return () => {
+      if (ws) ws.close();
+    };
+  }, []);
 
   // Copy Clipboard Helper
   const handleCopy = (text, id) => {
@@ -260,11 +313,11 @@ export default function App() {
                   AuraMatch
                 </span>
                 <span className="text-[9px] uppercase font-semibold tracking-wider bg-fuchsia-500/20 text-fuchsia-300 px-1.5 py-0.5 rounded-full border border-fuchsia-500/30">
-                  Primbon x Numerologi
+                  Primbon x WA Copilot
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 hidden sm:block">
-                Target CRM & Personal AI Dating Wingman
+                Target CRM, NLP Sentiment & Dating Copilot
               </p>
             </div>
           </div>
@@ -481,7 +534,7 @@ export default function App() {
         <div className="hidden md:flex space-x-2 border-b border-white/10 pb-2">
           <button 
             onClick={() => setActiveTab('match')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-medium text-xs transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all ${
               activeTab === 'match' 
                 ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-md' 
                 : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -492,46 +545,57 @@ export default function App() {
           
           <button 
             onClick={() => setActiveTab('numerology')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-medium text-xs transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all ${
               activeTab === 'numerology' 
                 ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-md' 
                 : 'text-slate-400 hover:text-white hover:bg-white/5'
             }`}
           >
-            <Sparkle className="w-3.5 h-3.5" /> 2. Numerologi & Cold Reading
+            <Sparkle className="w-3.5 h-3.5" /> 2. Numerologi
           </button>
 
           <button 
             onClick={() => setActiveTab('timing')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-medium text-xs transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all ${
               activeTab === 'timing' 
                 ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-md' 
                 : 'text-slate-400 hover:text-white hover:bg-white/5'
             }`}
           >
-            <Clock className="w-3.5 h-3.5" /> 3. Radar Jam & 9 Hari
+            <Clock className="w-3.5 h-3.5" /> 3. Radar Jam
           </button>
 
           <button 
             onClick={() => setActiveTab('scripts')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-medium text-xs transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all ${
               activeTab === 'scripts' 
                 ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-md' 
                 : 'text-slate-400 hover:text-white hover:bg-white/5'
             }`}
           >
-            <MessageSquare className="w-3.5 h-3.5" /> 4. Amunisi Chat & Closer
+            <MessageSquare className="w-3.5 h-3.5" /> 4. Amunisi Chat
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('wa_copilot')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all ${
+              activeTab === 'wa_copilot' 
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md' 
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Cpu className="w-3.5 h-3.5 text-emerald-400" /> 5. WA Copilot & NLP
           </button>
 
           <button 
             onClick={() => setActiveTab('playbook')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-medium text-xs transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all ${
               activeTab === 'playbook' 
                 ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-md' 
                 : 'text-slate-400 hover:text-white hover:bg-white/5'
             }`}
           >
-            <BookOpen className="w-3.5 h-3.5" /> 5. Playbook
+            <BookOpen className="w-3.5 h-3.5" /> 6. Playbook
           </button>
         </div>
 
@@ -628,7 +692,6 @@ export default function App() {
         {/* ================= TAB 2: NUMEROLOGI & COLD READING ================= */}
         {activeTab === 'numerology' && numerologyData && (
           <div className="space-y-4">
-            {/* Kartu Profil Numerologi Pythagoras */}
             <div className="glass-panel-glow p-4 sm:p-5 rounded-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <div>
@@ -648,7 +711,6 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Soul Urge */}
                 <div className="bg-white/5 p-3.5 rounded-xl border border-white/5 space-y-1.5">
                   <span className="text-[10px] uppercase font-bold text-cyan-300 flex items-center gap-1">
                     <Heart className="w-3 h-3 text-cyan-400" /> Soul Urge (Hasrat Rahasia Batin)
@@ -658,7 +720,6 @@ export default function App() {
                   <p className="text-cyan-200 text-[11px] pt-1"><strong>Tips Pikat:</strong> {numerologyData.soul.flirtTip}</p>
                 </div>
 
-                {/* Outer Mask */}
                 <div className="bg-white/5 p-3.5 rounded-xl border border-white/5 space-y-1.5">
                   <span className="text-[10px] uppercase font-bold text-purple-300 flex items-center gap-1">
                     <Eye className="w-3 h-3 text-purple-400" /> Outer Mask (Topeng Sosial Luar)
@@ -705,7 +766,6 @@ export default function App() {
         {/* ================= TAB 3: RADAR TIMING & 9 HARI ================= */}
         {activeTab === 'timing' && timingResult && (
           <div className="space-y-4">
-            {/* Status Personal Day Numerologi */}
             {personalDayData && (
               <div className="glass-panel-glow p-4 rounded-2xl border border-white/10 space-y-2">
                 <div className="flex items-center justify-between">
@@ -726,7 +786,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Status Energi Primbon */}
             <div className="glass-panel p-4 sm:p-5 rounded-2xl space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-2.5 gap-2">
                 <div>
@@ -740,9 +799,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Panduan Jam */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Golden Hours */}
                 <div className="space-y-2 bg-emerald-950/20 border border-emerald-500/20 p-3 sm:p-4 rounded-xl">
                   <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" /> Golden Hours (Waktu Terbaik Chat)
@@ -760,7 +817,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Danger Hours */}
                 <div className="space-y-2 bg-rose-950/20 border border-rose-500/20 p-3 sm:p-4 rounded-xl">
                   <h4 className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" /> Danger Zone (Tahan Follow-up)
@@ -780,7 +836,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Konsultasi Hadiah */}
             {giftData && (
               <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10 space-y-2.5">
                 <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
@@ -811,10 +866,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= TAB 4: AMUNISI CHAT & DATE CLOSER ================= */}
+        {/* ================= TAB 4: AMUNISI CHAT ================= */}
         {activeTab === 'scripts' && scriptData && (
           <div className="space-y-4">
-            {/* Filter Sub-Stage */}
             <div className="glass-panel p-3 sm:p-4 rounded-2xl space-y-3">
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
@@ -860,7 +914,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Note Situasi & Danger Alert */}
             {scriptData.modifierNote && (
               <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-xs text-cyan-200">
                 <strong>Catatan Taktis:</strong> {scriptData.modifierNote}
@@ -871,7 +924,6 @@ export default function App() {
               {scriptData.dangerAlert}
             </div>
 
-            {/* Template Script Siap Pakai (Chat Bubble Style) */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs sm:text-sm font-bold text-white">
@@ -913,7 +965,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Kunci Sukses Date Close */}
             {selectedStage === 'date_close' && (
               <div className="glass-panel p-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/10 space-y-2">
                 <h4 className="text-xs sm:text-sm font-bold text-emerald-400 flex items-center gap-1.5">
@@ -929,7 +980,188 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= TAB 5: PLAYBOOK ================= */}
+        {/* ================= TAB 5: WA COPILOT & NLP RADAR (NEW!) ================= */}
+        {activeTab === 'wa_copilot' && (
+          <div className="space-y-4">
+            {/* Status Koneksi WhatsApp Web */}
+            <div className="glass-panel p-4 rounded-2xl border border-emerald-500/30 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${isWsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></div>
+                  <h4 className="text-xs sm:text-sm font-bold text-white">
+                    Status WhatsApp: {isWsConnected ? 'Terhubung (Live Socket)' : 'Mode Co-Pilot Manual / Server Standby'}
+                  </h4>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowQRModal(!showQRModal)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-all"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>{wsQR ? 'Tampilkan QR Code' : 'Scan WA Web'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {isWsConnected 
+                  ? `Sistem aktif memonitor pesan masuk dari ${activeTarget.name}. Setiap ada balasan baru, NLP akan membedah emosinya secara otomatis.`
+                  : `Anda bisa menghubungkan WhatsApp Web melalui QR scan di server, ATAU cukup paste pesan terakhir dari ${activeTarget.name} di bawah ini untuk mendapatkan rekomendasi instan.`}
+              </p>
+            </div>
+
+            {/* Modal QR Code */}
+            {showQRModal && (
+              <div className="glass-panel-glow p-4 sm:p-5 rounded-2xl border border-emerald-500/30 text-center space-y-3">
+                <h4 className="text-xs sm:text-sm font-bold text-emerald-400">Scan QR Code dengan WhatsApp di HP</h4>
+                <p className="text-[11px] text-slate-300">
+                  Buka WhatsApp di HP &gt; Menu Titik Tiga / Pengaturan &gt; <strong>Perangkat Tertaut</strong> &gt; Tautkan Perangkat.
+                </p>
+
+                {wsQR ? (
+                  <div className="flex justify-center p-3 bg-white rounded-2xl max-w-[220px] mx-auto shadow-lg">
+                    <img src={wsQR} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
+                  </div>
+                ) : (
+                  <div className="bg-black/40 p-4 rounded-xl max-w-sm mx-auto border border-white/10 text-xs text-amber-300 space-y-1">
+                    <p>💡 <strong>Server WhatsApp Lokal Belum Dinyalakan:</strong></p>
+                    <p className="text-[10px] text-slate-400 font-mono">cd primbon-flirt-engine/whatsapp-server && npm start</p>
+                    <p className="text-[10px] text-slate-300 pt-1">
+                      (Anda tetap bisa menggunakan fitur analisis NLP canggih di bawah dengan mengetik/paste pesan target!)
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setShowQRModal(false)}
+                  className="px-4 py-1.5 rounded-lg bg-white/10 text-xs text-slate-300 hover:text-white"
+                >
+                  Tutup Jendela
+                </button>
+              </div>
+            )}
+
+            {/* Kotak Input / Paste Pesan Masuk Target */}
+            <div className="glass-panel p-4 rounded-2xl border border-white/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4 text-emerald-400" /> Bedah Pesan Terakhir dari {activeTarget.name}:
+                </label>
+                <span className="text-[10px] text-emerald-400">NLP Sentiment Analyzer</span>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="text"
+                  value={incomingChatInput}
+                  onChange={(e) => setIncomingChatInput(e.target.value)}
+                  placeholder="Ketik atau paste pesan masuk dari gebetan..."
+                  className="w-full bg-[#140f24] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-500 pr-10"
+                />
+              </div>
+
+              {/* Skenario Uji Cepat */}
+              <div>
+                <span className="text-[10px] text-slate-400 block mb-1">Coba skenario umum dengan 1-klik:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "Lagi capek bgt di kantor deadline numpuk",
+                    "Pasti sering ya ngomong gini ke semua cewek?",
+                    "Iya wkwk",
+                    "Hahaha seru bgt, kamu lagi apa sekarang?",
+                    "Belum tahu nih, lihat nanti ya"
+                  ].map((preset, pIdx) => (
+                    <button
+                      key={pIdx}
+                      onClick={() => setIncomingChatInput(preset)}
+                      className="text-[10px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/5 hover:border-emerald-500/30 text-slate-300 hover:text-emerald-200 transition-all text-left"
+                    >
+                      "{preset}"
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* HASIL ANALISA NLP & REKOMENDASI BALASAN */}
+            {analyzedChatResult && (
+              <div className="space-y-4">
+                {/* Radar Diagnosa Sentimen */}
+                <div className="glass-panel-glow p-4 rounded-2xl border border-emerald-500/30 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Suhu Emosi Terdeteksi</span>
+                      <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-amber-400" /> {analyzedChatResult.emotionalTone}
+                      </h4>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/10 text-slate-200 border border-white/10">
+                        Status: {analyzedChatResult.dangerLevel}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30">
+                        {targetWeton?.lakuning.name}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl text-xs text-emerald-200">
+                    <strong>Arahan Taktis Ronald Frank:</strong> {analyzedChatResult.tacticalAdvice}
+                  </div>
+                </div>
+
+                {/* 3 Opsi Balasan AI Siap Kirim */}
+                <div className="space-y-3">
+                  <h4 className="text-xs sm:text-sm font-bold text-white flex items-center justify-between">
+                    <span>3 Opsi Balasan Cerdas (Pilih & Kirim)</span>
+                    <span className="text-[10px] text-slate-400 font-normal">Klik salin untuk WhatsApp</span>
+                  </h4>
+
+                  <div className="space-y-3">
+                    {analyzedChatResult.replies.map((reply, rIdx) => (
+                      <div
+                        key={rIdx}
+                        className="glass-panel-glow p-4 rounded-2xl border border-white/10 space-y-2.5 relative group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                            {reply.category}
+                          </span>
+                          
+                          <button
+                            onClick={() => handleCopy(reply.text, `nlp_${rIdx}`)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                              copiedText === `nlp_${rIdx}`
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600 hover:text-white'
+                            }`}
+                          >
+                            {copiedText === `nlp_${rIdx}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedText === `nlp_${rIdx}` ? 'Disalin!' : 'Salin Pesan'}</span>
+                          </button>
+                        </div>
+
+                        {/* WhatsApp-Style Bubble */}
+                        <div className="bg-[#19132c] p-3.5 rounded-2xl rounded-tl-sm border border-white/10 text-xs sm:text-sm text-slate-100 italic leading-relaxed">
+                          "{reply.text}"
+                        </div>
+
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                          <Sparkles className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                          <span><strong>Mengapa Berhasil:</strong> {reply.reason}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= TAB 6: PLAYBOOK ================= */}
         {activeTab === 'playbook' && (
           <div className="space-y-4">
             <div className="glass-panel p-4 sm:p-5 rounded-2xl space-y-3">
@@ -1076,62 +1308,74 @@ export default function App() {
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#120d20]/95 backdrop-blur-lg border-t border-white/10 px-2 py-2 flex items-center justify-around shadow-2xl">
         <button
           onClick={() => setActiveTab('match')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all ${
             activeTab === 'match'
               ? 'text-fuchsia-400 font-bold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           <Heart className={`w-4 h-4 ${activeTab === 'match' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[9px] mt-0.5">Jodoh</span>
+          <span className="text-[8px] mt-0.5">Jodoh</span>
         </button>
 
         <button
           onClick={() => setActiveTab('numerology')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all ${
             activeTab === 'numerology'
               ? 'text-cyan-400 font-bold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           <Sparkle className={`w-4 h-4 ${activeTab === 'numerology' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[9px] mt-0.5">Numerologi</span>
+          <span className="text-[8px] mt-0.5">Numerologi</span>
         </button>
 
         <button
           onClick={() => setActiveTab('timing')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all ${
             activeTab === 'timing'
               ? 'text-fuchsia-400 font-bold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           <Clock className={`w-4 h-4 ${activeTab === 'timing' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[9px] mt-0.5">Radar</span>
+          <span className="text-[8px] mt-0.5">Radar</span>
         </button>
 
         <button
           onClick={() => setActiveTab('scripts')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all ${
             activeTab === 'scripts'
               ? 'text-fuchsia-400 font-bold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           <MessageSquare className={`w-4 h-4 ${activeTab === 'scripts' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[9px] mt-0.5">Amunisi</span>
+          <span className="text-[8px] mt-0.5">Amunisi</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('wa_copilot')}
+          className={`flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all ${
+            activeTab === 'wa_copilot'
+              ? 'text-emerald-400 font-bold'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Cpu className={`w-4 h-4 ${activeTab === 'wa_copilot' ? 'stroke-[2.5] text-emerald-400 animate-pulse' : ''}`} />
+          <span className="text-[8px] mt-0.5">WA Copilot</span>
         </button>
 
         <button
           onClick={() => setActiveTab('playbook')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all ${
             activeTab === 'playbook'
               ? 'text-fuchsia-400 font-bold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           <BookOpen className={`w-4 h-4 ${activeTab === 'playbook' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[9px] mt-0.5">Playbook</span>
+          <span className="text-[8px] mt-0.5">Playbook</span>
         </button>
       </nav>
 
