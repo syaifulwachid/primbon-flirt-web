@@ -6,12 +6,15 @@ import {
   ArrowRight, CheckCircle2, ChevronRight, Zap, Target,
   ChevronDown, ChevronUp, SlidersHorizontal, Share2, Plus,
   Trash2, Bell, BellRing, Eye, Sparkle, QrCode, RefreshCw,
-  Cpu, CheckCheck
+  Cpu, CheckCheck, Smartphone, Layers, ShieldCheck, ToggleLeft, ToggleRight
 } from 'lucide-react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { calculateWeton, calculateMatch, calculateDailyTiming, LAKUNING_MAP } from './engine/primbon';
 import { CHAT_STAGES, SITUATION_MODES, getChatRecommendation, getGiftConsultation } from './engine/ronaldFrank';
 import { calculateNameNumerology, calculatePersonalDay } from './engine/numerology';
-import { analyzeIncomingMessage } from './engine/nlpCopilot';
+import { analyzeIncomingMessage, analyzeConversationThread } from './engine/nlpCopilot';
+
+const AuraNativeBridge = Capacitor.isNativePlatform() ? registerPlugin('AuraNativeBridge') : null;
 
 // Data Default Awal
 const DEFAULT_USER = {
@@ -98,6 +101,103 @@ export default function App() {
   const [wsQR, setWsQR] = useState(null);
   const [showQRModal, setShowQRModal] = useState(false);
 
+  // Two-Way Conversation History & Kokpit Memori
+  const [conversationHistory, setConversationHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`AURAMATCH_CHAT_HISTORY_${activeTargetId}`);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      { id: '1', sender: 'target', text: 'Lagi capek bgt nih lembur terus di kantor', time: '14:02' },
+      { id: '2', sender: 'user', text: 'Kelihatan banget kepalanya butuh disiram es kopi susu sore ini haha', time: '14:05' },
+      { id: '3', sender: 'target', text: 'Wkwk bener bgt, mau dong!', time: '14:07' }
+    ];
+  });
+  const [newManualReply, setNewManualReply] = useState('');
+  const [threadAnalysis, setThreadAnalysis] = useState(null);
+
+  // Native Android States & Bridge
+  const [isNativeApp] = useState(Capacitor.isNativePlatform());
+  const [nativePerms, setNativePerms] = useState({
+    notificationListener: false,
+    overlay: false,
+    accessibility: false,
+    isBubbleRunning: false
+  });
+
+  // Sinkronisasi Native Android Bridge jika berjalan di HP
+  useEffect(() => {
+    if (Capacitor.isNativePlatform() && AuraNativeBridge) {
+      const checkAllPerms = async () => {
+        try {
+          const res = await AuraNativeBridge.checkPermissions();
+          if (res) setNativePerms(res);
+        } catch (e) {
+          console.error("Native perms check failed:", e);
+        }
+      };
+
+      checkAllPerms();
+
+      const listenerPromise = AuraNativeBridge.addListener('onWhatsAppChatEvent', (event) => {
+        if (!event || !event.text) return;
+        const now = new Date(event.timestamp || Date.now());
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        const newMsg = {
+          id: `native-${event.timestamp || Date.now()}`,
+          sender: event.role === 'user' ? 'user' : 'target',
+          text: event.text.trim(),
+          time: timeStr
+        };
+
+        setConversationHistory(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].text === event.text.trim()) {
+            return prev;
+          }
+          return [...prev, newMsg];
+        });
+
+        if (event.role !== 'user') {
+          setIncomingChatInput(event.text.trim());
+        }
+      });
+
+      return () => {
+        listenerPromise.then(h => h.remove?.()).catch(() => {});
+      };
+    }
+  }, []);
+
+  const handleOpenNativeSetting = async (type) => {
+    if (AuraNativeBridge) {
+      try {
+        await AuraNativeBridge.openPermissionSettings({ type });
+        setTimeout(async () => {
+          try {
+            const res = await AuraNativeBridge.checkPermissions();
+            if (res) setNativePerms(res);
+          } catch {}
+        }, 1500);
+      } catch (e) {
+        console.error("Open setting failed:", e);
+      }
+    }
+  };
+
+  const handleToggleFloatingBubble = async () => {
+    if (AuraNativeBridge) {
+      try {
+        const res = await AuraNativeBridge.toggleFloatingBubble();
+        if (res) {
+          setNativePerms(prev => ({ ...prev, isBubbleRunning: res.isBubbleRunning }));
+        }
+      } catch (e) {
+        console.error("Toggle bubble failed:", e);
+      }
+    }
+  };
+
   // Hasil Kalkulasi
   const [userWeton, setUserWeton] = useState(null);
   const [targetWeton, setTargetWeton] = useState(null);
@@ -178,6 +278,36 @@ export default function App() {
       setAnalyzedChatResult(analysis);
     }
   }, [incomingChatInput, targetWeton, numerologyData, personalDayData]);
+
+  // Sinkronisasi memori chat per target
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`AURAMATCH_CHAT_HISTORY_${activeTargetId}`);
+      if (saved) {
+        setConversationHistory(JSON.parse(saved));
+      } else {
+        setConversationHistory([
+          { id: '1', sender: 'target', text: 'Lagi capek bgt nih lembur terus di kantor', time: '14:02' },
+          { id: '2', sender: 'user', text: 'Kelihatan banget kepalanya butuh disiram es kopi susu sore ini haha', time: '14:05' },
+          { id: '3', sender: 'target', text: 'Wkwk bener bgt, mau dong!', time: '14:07' }
+        ]);
+      }
+    } catch {}
+  }, [activeTargetId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`AURAMATCH_CHAT_HISTORY_${activeTargetId}`, JSON.stringify(conversationHistory));
+    } catch {}
+  }, [conversationHistory, activeTargetId]);
+
+  // Evaluasi Utuh Dua Arah (Two-Way Context & Investment Ratio)
+  useEffect(() => {
+    if (conversationHistory.length > 0 && targetWeton && numerologyData && personalDayData) {
+      const res = analyzeConversationThread(conversationHistory, targetWeton, numerologyData, personalDayData);
+      setThreadAnalysis(res);
+    }
+  }, [conversationHistory, targetWeton, numerologyData, personalDayData]);
 
   // WebSocket & HTTP Fallback Polling ke WhatsApp Server Lokal (port 4000)
   useEffect(() => {
@@ -1004,16 +1134,105 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= TAB 5: WA COPILOT & NLP RADAR (NEW!) ================= */}
+        {/* ================= TAB 5: WA COPILOT & TWO-WAY CONTEXT (UPGRADED!) ================= */}
         {activeTab === 'wa_copilot' && (
           <div className="space-y-4">
+            {/* Panel Native Android Wingman (Dua Arah & Floating Bubble) */}
+            <div className="glass-panel p-4 rounded-2xl border border-violet-500/30 bg-violet-950/20 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-violet-600/30 border border-violet-500/40 flex items-center justify-center text-violet-300 flex-shrink-0">
+                    <Smartphone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
+                      <span>Android Wingman 2 Arah</span>
+                      <span className="text-[9px] bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded-full border border-violet-500/30">
+                        {isNativeApp ? 'Mode Native HP' : 'Tersedia di APK'}
+                      </span>
+                    </h4>
+                    <p className="text-[10px] text-slate-400">
+                      Merekam otomatis pesan masuk gebetan & balasan keluar Anda untuk rasio investasi kata
+                    </p>
+                  </div>
+                </div>
+
+                {isNativeApp && (
+                  <button
+                    onClick={handleToggleFloatingBubble}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-md transition-all ${
+                      nativePerms.isBubbleRunning 
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white' 
+                        : 'bg-violet-600 hover:bg-violet-500 text-white'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>{nativePerms.isBubbleRunning ? 'Tutup Bubble' : 'Aktifkan Bubble'}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Status Izin Native Android */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Notifikasi WhatsApp</span>
+                    <span className={`text-xs font-bold ${nativePerms.notificationListener ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {nativePerms.notificationListener ? 'Aktif' : 'Perlu Izin'}
+                    </span>
+                  </div>
+                  {isNativeApp && !nativePerms.notificationListener && (
+                    <button
+                      onClick={() => handleOpenNativeSetting('notification')}
+                      className="text-[10px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white"
+                    >
+                      Buka Izin
+                    </button>
+                  )}
+                </div>
+
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Baca Chat 2 Arah</span>
+                    <span className={`text-xs font-bold ${nativePerms.accessibility ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {nativePerms.accessibility ? 'Aktif' : 'Aksesibilitas'}
+                    </span>
+                  </div>
+                  {isNativeApp && !nativePerms.accessibility && (
+                    <button
+                      onClick={() => handleOpenNativeSetting('accessibility')}
+                      className="text-[10px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white"
+                    >
+                      Buka Izin
+                    </button>
+                  )}
+                </div>
+
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Gelembung Melayang</span>
+                    <span className={`text-xs font-bold ${nativePerms.overlay ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {nativePerms.overlay ? 'Diizinkan' : 'Overlay Pop-up'}
+                    </span>
+                  </div>
+                  {isNativeApp && !nativePerms.overlay && (
+                    <button
+                      onClick={() => handleOpenNativeSetting('overlay')}
+                      className="text-[10px] px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white"
+                    >
+                      Buka Izin
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
             {/* Status Koneksi WhatsApp Web */}
             <div className="glass-panel p-4 rounded-2xl border border-emerald-500/30 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded-full ${isWsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></div>
                   <h4 className="text-xs sm:text-sm font-bold text-white">
-                    Status WhatsApp: {isWsConnected ? 'Terhubung (Live Socket)' : 'Mode Co-Pilot Manual / Server Standby'}
+                    Status WhatsApp: {isWsConnected ? `Terhubung (${connectedNumber || 'Live'})` : 'Mode Co-Pilot Manual (Server Standby)'}
                   </h4>
                 </div>
 
@@ -1031,7 +1250,7 @@ export default function App() {
               <p className="text-[11px] text-slate-300 leading-relaxed">
                 {isWsConnected 
                   ? `Sistem aktif memonitor pesan masuk dari ${activeTarget.name}. Setiap ada balasan baru, NLP akan membedah emosinya secara otomatis.`
-                  : `Anda bisa menghubungkan WhatsApp Web melalui QR scan di server, ATAU cukup paste pesan terakhir dari ${activeTarget.name} di bawah ini untuk mendapatkan rekomendasi instan.`}
+                  : `Anda bisa menghubungkan WhatsApp Web melalui QR scan, atau gunakan Kokpit Memori 2 Arah di bawah untuk merekam obrolan dan mendapatkan rekomendasi cerdas.`}
               </p>
             </div>
 
@@ -1077,119 +1296,225 @@ export default function App() {
               </div>
             )}
 
-            {/* Kotak Input / Paste Pesan Masuk Target */}
+            {/* KOKPIT MEMORI 2 ARAH: METERAN INVESTASI KATA & TANGGA ESKALASI */}
+            {threadAnalysis && (
+              <div className="glass-panel-glow p-4 sm:p-5 rounded-2xl border border-emerald-500/30 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Konteks Percakapan 2 Arah</span>
+                    <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                      <span>{userProfile.name}</span>
+                      <span className="text-slate-400">&harr;</span>
+                      <span className="text-emerald-400">{activeTarget.name}</span>
+                    </h3>
+                  </div>
+
+                  {/* Tangga Eskalasi */}
+                  <div className="text-left sm:text-right">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Status PDKT Funnel</span>
+                    <span className="text-xs font-bold text-fuchsia-300">{threadAnalysis.escalationLabel}</span>
+                  </div>
+                </div>
+
+                {/* Progress Bar Eskalasi */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>Progress Menuju Kencan Nyata:</span>
+                    <span className="font-bold text-emerald-400">{threadAnalysis.escalationProgress}%</span>
+                  </div>
+                  <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-gradient-to-r from-violet-600 via-fuchsia-500 to-emerald-400 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${threadAnalysis.escalationProgress}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Meteran Rasio Investasi Kata (Ronald Frank Law) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5 text-center">
+                    <span className="text-[10px] text-slate-400 block">Kata Diketik Kamu</span>
+                    <span className="text-base font-bold text-blue-300">{threadAnalysis.userWords} kata</span>
+                  </div>
+
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5 text-center">
+                    <span className="text-[10px] text-slate-400 block">Kata Diketik {activeTarget.name}</span>
+                    <span className="text-base font-bold text-fuchsia-300">{threadAnalysis.targetWords} kata</span>
+                  </div>
+
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5 text-center flex flex-col justify-center">
+                    <span className="text-[10px] text-slate-400 block">Rasio Investasi</span>
+                    <div className="flex items-center justify-center gap-1">
+                      <span className="text-base font-bold text-white">{threadAnalysis.ratio}x</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${threadAnalysis.ratioBadge}`}>
+                        {threadAnalysis.ratioStatus}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`p-2.5 rounded-xl text-xs leading-relaxed border ${threadAnalysis.ratioBadge}`}>
+                  {threadAnalysis.ratioMessage}
+                </div>
+              </div>
+            )}
+
+            {/* THREAD CHAT 2 ARAH (WhatsApp Style Timeline) */}
             <div className="glass-panel p-4 rounded-2xl border border-white/10 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                  <Cpu className="w-4 h-4 text-emerald-400" /> Bedah Pesan Terakhir dari {activeTarget.name}:
-                </label>
-                <span className="text-[10px] text-emerald-400">NLP Sentiment Analyzer</span>
+              <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <MessageSquare className="w-4 h-4 text-emerald-400" /> Riwayat Percakapan yang Terekam:
+                </h4>
+                <button
+                  onClick={() => {
+                    if (confirm('Bersihkan riwayat percakapan untuk target ini?')) {
+                      setConversationHistory([]);
+                    }
+                  }}
+                  className="text-[10px] text-slate-400 hover:text-rose-400 flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" /> Reset Thread
+                </button>
               </div>
 
-              <div className="relative">
-                <input
-                  type="text"
-                  value={incomingChatInput}
-                  onChange={(e) => setIncomingChatInput(e.target.value)}
-                  placeholder="Ketik atau paste pesan masuk dari gebetan..."
-                  className="w-full bg-[#140f24] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-500 pr-10"
-                />
-              </div>
-
-              {/* Skenario Uji Cepat */}
-              <div>
-                <span className="text-[10px] text-slate-400 block mb-1">Coba skenario umum dengan 1-klik:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    "Lagi capek bgt di kantor deadline numpuk",
-                    "Pasti sering ya ngomong gini ke semua cewek?",
-                    "Iya wkwk",
-                    "Hahaha seru bgt, kamu lagi apa sekarang?",
-                    "Belum tahu nih, lihat nanti ya"
-                  ].map((preset, pIdx) => (
-                    <button
-                      key={pIdx}
-                      onClick={() => setIncomingChatInput(preset)}
-                      className="text-[10px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/5 hover:border-emerald-500/30 text-slate-300 hover:text-emerald-200 transition-all text-left"
+              {/* Chat Stream Bubble List */}
+              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1 no-scrollbar">
+                {conversationHistory.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-slate-500 italic">
+                    Belum ada riwayat chat. Masukkan pesan dari {activeTarget.name} di bawah untuk memulai!
+                  </div>
+                ) : (
+                  conversationHistory.map((chat) => (
+                    <div
+                      key={chat.id}
+                      className={`flex flex-col ${chat.sender === 'user' ? 'items-end' : 'items-start'}`}
                     >
-                      "{preset}"
-                    </button>
-                  ))}
+                      <div className="text-[9px] text-slate-500 mb-0.5 px-1">
+                        {chat.sender === 'user' ? 'Kamu' : activeTarget.name} &bull; {chat.time}
+                      </div>
+                      <div
+                        className={`max-w-[85%] sm:max-w-[75%] p-3 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-md ${
+                          chat.sender === 'user'
+                            ? 'bg-emerald-900/40 text-emerald-100 rounded-tr-sm border border-emerald-500/30'
+                            : 'bg-[#211a38] text-slate-100 rounded-tl-sm border border-white/10'
+                        }`}
+                      >
+                        "{chat.text}"
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Input Tambah Pesan Manual Cepat */}
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={incomingChatInput}
+                    onChange={(e) => setIncomingChatInput(e.target.value)}
+                    placeholder={`Pesan baru dari ${activeTarget.name}...`}
+                    className="w-full bg-[#140f24] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-fuchsia-500"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!incomingChatInput.trim()) return;
+                      const newMsg = {
+                        id: String(Date.now()),
+                        sender: 'target',
+                        text: incomingChatInput.trim(),
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      };
+                      setConversationHistory(prev => [...prev, newMsg]);
+                      setIncomingChatInput('');
+                    }}
+                    className="px-3 py-2 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold flex-shrink-0"
+                  >
+                    + Catat Dia
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newManualReply}
+                    onChange={(e) => setNewManualReply(e.target.value)}
+                    placeholder="Catat pesan yang kamu kirim..."
+                    className="w-full bg-[#140f24] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!newManualReply.trim()) return;
+                      const newMsg = {
+                        id: String(Date.now()),
+                        sender: 'user',
+                        text: newManualReply.trim(),
+                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      };
+                      setConversationHistory(prev => [...prev, newMsg]);
+                      setNewManualReply('');
+                    }}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex-shrink-0"
+                  >
+                    + Catat Kamu
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* HASIL ANALISA NLP & REKOMENDASI BALASAN */}
-            {analyzedChatResult && (
-              <div className="space-y-4">
-                {/* Radar Diagnosa Sentimen */}
-                <div className="glass-panel-glow p-4 rounded-2xl border border-emerald-500/30 space-y-2.5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
-                    <div>
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400 block">Suhu Emosi Terdeteksi</span>
-                      <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                        <Zap className="w-3.5 h-3.5 text-amber-400" /> {analyzedChatResult.emotionalTone}
-                      </h4>
-                    </div>
+            {/* HASIL ANALISA NLP & 3 REKOMENDASI BALASAN CERDAS */}
+            {threadAnalysis && (
+              <div className="space-y-3">
+                <h4 className="text-xs sm:text-sm font-bold text-white flex items-center justify-between">
+                  <span>3 Rekomendasi Balasan Memikat Berdasarkan Alur Chat</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Klik untuk salin & simpan</span>
+                </h4>
 
-                    <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/10 text-slate-200 border border-white/10">
-                        Status: {analyzedChatResult.dangerLevel}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30">
-                        {targetWeton?.lakuning.name}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl text-xs text-emerald-200">
-                    <strong>Arahan Taktis Ronald Frank:</strong> {analyzedChatResult.tacticalAdvice}
-                  </div>
-                </div>
-
-                {/* 3 Opsi Balasan AI Siap Kirim */}
                 <div className="space-y-3">
-                  <h4 className="text-xs sm:text-sm font-bold text-white flex items-center justify-between">
-                    <span>3 Opsi Balasan Cerdas (Pilih & Kirim)</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Klik salin untuk WhatsApp</span>
-                  </h4>
-
-                  <div className="space-y-3">
-                    {analyzedChatResult.replies.map((reply, rIdx) => (
-                      <div
-                        key={rIdx}
-                        className="glass-panel-glow p-4 rounded-2xl border border-white/10 space-y-2.5 relative group"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                            {reply.category}
-                          </span>
-                          
-                          <button
-                            onClick={() => handleCopy(reply.text, `nlp_${rIdx}`)}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
-                              copiedText === `nlp_${rIdx}`
-                                ? 'bg-emerald-500 text-white'
-                                : 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600 hover:text-white'
-                            }`}
-                          >
-                            {copiedText === `nlp_${rIdx}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                            <span>{copiedText === `nlp_${rIdx}` ? 'Disalin!' : 'Salin Pesan'}</span>
-                          </button>
-                        </div>
-
-                        {/* WhatsApp-Style Bubble */}
-                        <div className="bg-[#19132c] p-3.5 rounded-2xl rounded-tl-sm border border-white/10 text-xs sm:text-sm text-slate-100 italic leading-relaxed">
-                          "{reply.text}"
-                        </div>
-
-                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                          <Sparkles className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                          <span><strong>Mengapa Berhasil:</strong> {reply.reason}</span>
-                        </div>
+                  {threadAnalysis.replies.map((reply, rIdx) => (
+                    <div
+                      key={rIdx}
+                      className="glass-panel-glow p-4 rounded-2xl border border-white/10 space-y-2.5 relative group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          {reply.category}
+                        </span>
+                        
+                        <button
+                          onClick={() => {
+                            handleCopy(reply.text, `thread_${rIdx}`);
+                            // Catat otomatis ke memori sebagai balasan kamu!
+                            const newReply = {
+                              id: String(Date.now()),
+                              sender: 'user',
+                              text: reply.text,
+                              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            };
+                            setConversationHistory(prev => [...prev, newReply]);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                            copiedText === `thread_${rIdx}`
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
+                          }`}
+                        >
+                          {copiedText === `thread_${rIdx}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedText === `thread_${rIdx}` ? 'Disalin & Dicatat!' : 'Salin & Catat Balasan'}</span>
+                        </button>
                       </div>
-                    ))}
-                  </div>
+
+                      {/* WhatsApp-Style Bubble */}
+                      <div className="bg-[#19132c] p-3.5 rounded-2xl rounded-tl-sm border border-white/10 text-xs sm:text-sm text-slate-100 italic leading-relaxed">
+                        "{reply.text}"
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                        <Sparkles className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                        <span><strong>Alasan Psikologis:</strong> {reply.reason}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

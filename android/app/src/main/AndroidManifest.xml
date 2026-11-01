@@ -33,6 +33,37 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Service Pembaca Notifikasi WhatsApp -->
+        <service
+            android:name=".WhatsAppNotificationListener"
+            android:label="AuraMatch WA Listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Service Pembaca Obrolan WhatsApp Dua Arah (Accessibility) -->
+        <service
+            android:name=".WhatsAppAccessibilityReaderService"
+            android:label="AuraMatch Dua Arah Copilot"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/whatsapp_accessibility_config" />
+        </service>
+
+        <!-- Service Gelembung Melayang (Floating Bubble Overlay) -->
+        <service
+            android:name=".FloatingWingmanService"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->

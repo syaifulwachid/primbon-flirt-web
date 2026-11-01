@@ -4,4 +4,5 @@
     <string name="title_activity_main">AuraMatch</string>
     <string name="package_name">com.auramatch.app</string>
     <string name="custom_url_scheme">com.auramatch.app</string>
+    <string name="accessibility_service_description">Membaca konteks obrolan WhatsApp dua arah (pesan masuk dan balasan keluar) untuk analisis AI Flirting Copilot secara real-time.</string>
 </resources>

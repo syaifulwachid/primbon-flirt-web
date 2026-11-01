@@ -1,8 +1,8 @@
 /**
  * NLP Sentiment & AI Flirting Copilot Engine
  * Membedah pesan masuk dari target menggunakan analisis sentimen psikologis,
- * mendeteksi "Shit Test", suhu emosi, dan menghasilkan 3 rekomendasi balasan
- * yang disesuaikan dengan Weton & Numerologi target ala Ronald Frank.
+ * mendeteksi "Shit Test", suhu emosi, rasio investasi kata (Two-Way Context),
+ * dan menghasilkan 3 rekomendasi balasan yang disesuaikan dengan Weton & Numerologi.
  */
 
 // Kamus Pola Deteksi NLP
@@ -68,10 +68,6 @@ const NLP_PATTERNS = {
 
 /**
  * Menganalisa teks pesan terakhir wanita
- * @param {string} incomingMessage Pesan teks dari target
- * @param {object} targetWeton Profil weton target
- * @param {object} numerologyData Profil numerologi target
- * @param {object} personalDayData Profil siklus hari ini
  */
 export function analyzeIncomingMessage(incomingMessage, targetWeton, numerologyData, personalDayData) {
   if (!incomingMessage || !incomingMessage.trim()) {
@@ -126,11 +122,86 @@ export function analyzeIncomingMessage(incomingMessage, targetWeton, numerologyD
 }
 
 /**
+ * Menganalisa Riwayat Percakapan Utuh Dua Arah (Two-Way Context)
+ * Menghitung rasio investasi kata, level eskalasi kencan, dan rekomendasi berikutnya.
+ */
+export function analyzeConversationThread(messages, targetWeton, numerologyData, personalDayData) {
+  if (!messages || messages.length === 0) return null;
+
+  let userWords = 0;
+  let targetWords = 0;
+
+  messages.forEach(m => {
+    const words = (m.text || '').trim().split(/\s+/).filter(Boolean).length;
+    if (m.sender === 'user') {
+      userWords += words;
+    } else {
+      targetWords += words;
+    }
+  });
+
+  const ratio = (userWords / Math.max(targetWords, 1)).toFixed(2);
+  let ratioStatus = 'Ideal';
+  let ratioMessage = 'Dinamika Seimbang & Menarik (Saling Berinvestasi Kata).';
+  let ratioBadge = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+
+  if (parseFloat(ratio) > 2.0 && targetWords > 10) {
+    ratioStatus = 'Danger (Over-Investment)';
+    ratioMessage = '⚠️ Anda mengetik 2x lebih panjang dari target! Hukum Ronald Frank: Jangan terlihat over-invested. Pangkas pesan berikutnya menjadi 1 kalimat pendek.';
+    ratioBadge = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+  } else if (parseFloat(ratio) < 0.6 && targetWords > 15) {
+    ratioStatus = 'High Mystery (Target Mengejar)';
+    ratioMessage = '🔥 Target menginvestasikan kata jauh lebih banyak dari Anda! Nilai diri Anda tinggi dan dia sangat tertarik.';
+    ratioBadge = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
+  }
+
+  // Tangga Eskalasi (Level 1 s/d 4)
+  const totalMessages = messages.length;
+  let escalationLevel = 1;
+  let escalationLabel = 'Level 1: Opening & Icebreaking';
+  let escalationProgress = 25;
+
+  if (totalMessages >= 8 || targetWords > 50) {
+    escalationLevel = 4;
+    escalationLabel = 'Level 4: 🎯 Date Close Ready (Waktunya Eksekusi Kencan!)';
+    escalationProgress = 100;
+  } else if (totalMessages >= 5) {
+    escalationLevel = 3;
+    escalationLabel = 'Level 3: Deep Comfort & Keintiman Emosional';
+    escalationProgress = 75;
+  } else if (totalMessages >= 3) {
+    escalationLevel = 2;
+    escalationLabel = 'Level 2: Playful Banter & Teasing';
+    escalationProgress = 50;
+  }
+
+  // Ambil pesan terakhir dari target
+  const lastTargetMsg = [...messages].reverse().find(m => m.sender === 'target');
+  const baseAnalysis = analyzeIncomingMessage(
+    lastTargetMsg ? lastTargetMsg.text : messages[messages.length - 1].text,
+    targetWeton,
+    numerologyData,
+    personalDayData
+  );
+
+  return {
+    ...baseAnalysis,
+    userWords,
+    targetWords,
+    ratio,
+    ratioStatus,
+    ratioMessage,
+    ratioBadge,
+    escalationLevel,
+    escalationLabel,
+    escalationProgress
+  };
+}
+
+/**
  * Generator 3 Opsi Balasan AI ala Ronald Frank
  */
 function generateSmartReplies(type, msg, targetWeton, numerologyData, personalDayData) {
-  const targetName = numerologyData?.cleanName || 'dia';
-
   switch (type) {
     case 'shitTest':
       return [
