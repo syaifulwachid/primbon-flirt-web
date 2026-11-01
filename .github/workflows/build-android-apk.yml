@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Android APK
@@ -13,6 +16,13 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,25 +36,39 @@ jobs:
       - name: Build Web Assets
         run: npm run build
 
-      - name: Sync Capacitor Android
-        run: npx cap sync android
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: gradle
+      - name: Copy Assets to Capacitor Android
+        run: npx cap copy android
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x android/gradlew
 
       - name: Build APK with Gradle
-        run: cd android && ./gradlew assembleDebug --stacktrace
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AuraMatch-v1.0-Debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Publish Release APK
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.0-apk
+          name: "AuraMatch Android v1.0.0 (Debug APK)"
+          body: |
+            ### 📱 AuraMatch - Primbon x NLP WhatsApp Dating Copilot
+            Download file APK di bawah ini dan pasang langsung di HP Android Anda.
+            
+            **Fitur Utama:**
+            - 🔮 Primbon Jawa (Weton, Neptu, Lakuning, Petung Jodoh Modulo 8)
+            - 🔢 Pythagorean Numerologi & Cold Reading Generator
+            - 💬 Two-Way WhatsApp Copilot (Word Investment Ratio & Escalation Ladder)
+            - ⚡ Floating Bubble Wingman & Android Accessibility Reader
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
