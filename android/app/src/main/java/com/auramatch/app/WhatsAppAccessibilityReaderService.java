@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.util.Log;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -48,7 +49,7 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
     private void extractActiveContactName(AccessibilityNodeInfo root) {
         // WhatsApp contact name biasanya ada di ID 'conversation_contact_name'
         for (String id : new String[]{"com.whatsapp:id/conversation_contact_name", "com.whatsapp:id/conversation_contact_status"}) {
-            var nodes = root.findAccessibilityNodeInfosByViewId(id);
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
             if (nodes != null && !nodes.isEmpty()) {
                 CharSequence text = nodes.get(0).getText();
                 if (text != null && text.length() > 0) {
@@ -109,11 +110,11 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
         if (parent == null) return false;
 
         try {
-            var statusNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/status");
+            List<AccessibilityNodeInfo> statusNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/status");
             if (statusNodes != null && !statusNodes.isEmpty()) {
                 return true; // Ada status icon -> Ini pesan keluar dari kita!
             }
-            var dateNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/date");
+            List<AccessibilityNodeInfo> dateNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/date");
             // Outgoing bubbles di WhatsApp umumnya align di sebelah kanan atau memiliki descriptor status
             if (parent.getContentDescription() != null && parent.getContentDescription().toString().toLowerCase().contains("anda")) {
                 return true;
