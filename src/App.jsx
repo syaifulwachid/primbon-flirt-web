@@ -125,6 +125,27 @@ export default function App() {
     isBubbleRunning: false
   });
 
+  // Filter WhatsApp & Diagnostik Real-time
+  const [monitorAllChats, setMonitorAllChats] = useState(false);
+  const [customContactFilter, setCustomContactFilter] = useState('');
+  const [extraFilterNames, setExtraFilterNames] = useState(() => {
+    try {
+      const s = localStorage.getItem('AURAMATCH_EXTRA_FILTERS');
+      return s ? JSON.parse(s) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [diagnosticInfo, setDiagnosticInfo] = useState({
+    lastContact: '-',
+    lastMessage: '-',
+    lastTimestamp: 0,
+    lastFilterPassed: false,
+    isAccessibilityEnabled: false,
+    isNotificationEnabled: false,
+    isBubbleRunning: false
+  });
+
   // Sinkronisasi Native Android Bridge jika berjalan di HP
   useEffect(() => {
     if (Capacitor.isNativePlatform() && AuraNativeBridge) {
@@ -169,13 +190,38 @@ export default function App() {
     }
   }, []);
 
-  // Sinkronkan daftar nama target CRM ke modul Whitelist Filter Native Android
+  // Polling Diagnostik Pemindai WhatsApp Real-Time
   useEffect(() => {
+    if (Capacitor.isNativePlatform() && AuraNativeBridge && activeTab === 'wa_copilot') {
+      const pollDiag = async () => {
+        try {
+          const diag = await AuraNativeBridge.getDiagnosticStatus();
+          if (diag) {
+            setDiagnosticInfo(diag);
+            if (diag.monitorAll !== undefined) setMonitorAllChats(diag.monitorAll);
+          }
+        } catch {}
+      };
+      pollDiag();
+      const interval = setInterval(pollDiag, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
+
+  // Sinkronkan daftar nama target CRM + Filter Tambahan ke modul Native Android
+  useEffect(() => {
+    try {
+      localStorage.setItem('AURAMATCH_EXTRA_FILTERS', JSON.stringify(extraFilterNames));
+    } catch {}
+
     if (Capacitor.isNativePlatform() && AuraNativeBridge) {
-      const targetNames = targets.map(t => t.name).filter(Boolean);
+      const targetNames = [
+        ...targets.map(t => t.name).filter(Boolean),
+        ...extraFilterNames
+      ];
       AuraNativeBridge.updateTargetWhitelist({ targets: targetNames }).catch(() => {});
     }
-  }, [targets]);
+  }, [targets, extraFilterNames]);
 
   const handleOpenNativeSetting = async (type) => {
     if (AuraNativeBridge) {
@@ -419,8 +465,22 @@ export default function App() {
     }
   };
 
-  // Trigger Native / Web Notification Simulator
+  // Trigger Native / Web Notification
   const handleRequestNotification = async () => {
+    if (Capacitor.isNativePlatform() && AuraNativeBridge) {
+      try {
+        await AuraNativeBridge.showNotification({
+          title: `🔮 AuraMatch Wingman: Golden Hour ${activeTarget.name}!`,
+          body: `Sekarang waktu terbaik mengirim pesan Hook ke ${activeTarget.name}. Karakter ${targetWeton ? targetWeton.lakuning.archetype : 'Lakuning'}-nya sedang santai & terbuka!`
+        });
+        setNotificationToast(`Notifikasi Alarm Jam Emas berhasil dikirim ke status bar HP Anda!`);
+        setTimeout(() => setNotificationToast(null), 4000);
+        return;
+      } catch (err) {
+        console.error("Native notification failed:", err);
+      }
+    }
+
     if (!('Notification' in window)) {
       alert('Browser Anda belum mendukung notifikasi.');
       return;
@@ -1234,20 +1294,152 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Filter Privasi Khusus (Whitelist CRM) */}
-              <div className="bg-emerald-950/40 border border-emerald-500/30 p-3 rounded-xl flex items-start gap-2.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <div className="text-[11px] space-y-1">
-                  <div className="font-bold text-emerald-300 flex items-center gap-1.5">
-                    <span>Filter Privasi Khusus Aktif:</span>
-                    <span className="bg-emerald-500/20 px-2 py-0.5 rounded-full text-[10px] text-emerald-200">
-                      {targets.length} Target Terpantau
-                    </span>
+              {/* Pusat Kontrol Filter Percakapan & Live Scanner */}
+              <div className="bg-[#120d20] border border-violet-500/40 p-3.5 sm:p-4 rounded-xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    <h5 className="text-xs font-bold text-white">Filter Percakapan WhatsApp yang Dipantau</h5>
                   </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Sistem <strong>hanya memproses</strong> pesan dari: <strong className="text-white">{targets.map(t => t.name).join(', ')}</strong>.
-                    Chat keluarga, grup kantor, kerabat, dan pesan sensitif lainnya <strong>diblokir total</strong> dan diabaikan dari pembacaan.
-                  </p>
+
+                  {/* Mode Saklar Toggle */}
+                  <div className="flex items-center gap-1.5 bg-black/40 p-1 rounded-lg border border-white/10">
+                    <button
+                      onClick={async () => {
+                        setMonitorAllChats(false);
+                        if (Capacitor.isNativePlatform() && AuraNativeBridge) {
+                          await AuraNativeBridge.setMonitorAllChats({ allowAll: false });
+                        }
+                      }}
+                      className={`px-2 py-1 rounded text-[10px] font-semibold transition-all ${
+                        !monitorAllChats ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Target Tertentu
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setMonitorAllChats(true);
+                        if (Capacitor.isNativePlatform() && AuraNativeBridge) {
+                          await AuraNativeBridge.setMonitorAllChats({ allowAll: true });
+                        }
+                      }}
+                      className={`px-2 py-1 rounded text-[10px] font-semibold transition-all ${
+                        monitorAllChats ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                      }`}
+                      title="Membaca chat apapun yang Anda buka di layar WhatsApp"
+                    >
+                      Pantau Chat Aktif (Testing)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Penjelasan Mode */}
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {monitorAllChats ? (
+                    <span className="text-emerald-300">
+                      ⚡ <strong>Mode Pantau Chat Aktif Nyala:</strong> AuraMatch akan otomatis membaca obrolan siapa pun yang saat ini sedang Anda buka di layar WhatsApp untuk pengujian.
+                    </span>
+                  ) : (
+                    <span>
+                      🛡️ <strong>Mode Target Tertentu Nyala:</strong> Aplikasi <em>hanya</em> membaca percakapan jika nama kontak di WhatsApp cocok dengan daftar di bawah. Semua chat lain diblokir demi privasi.
+                    </span>
+                  )}
+                </p>
+
+                {/* Form Tambah Nama Kontak WhatsApp Khusus */}
+                {!monitorAllChats && (
+                  <div className="space-y-2 pt-1">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customContactFilter}
+                        onChange={(e) => setCustomContactFilter(e.target.value)}
+                        placeholder="Ketik nama kontak di WA Anda (cth: Dian, Ayang, +628...)"
+                        className="w-full bg-[#18122c] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-violet-500"
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (!customContactFilter.trim()) return;
+                          const name = customContactFilter.trim();
+                          if (!extraFilterNames.includes(name)) {
+                            setExtraFilterNames(prev => [...prev, name]);
+                          }
+                          setCustomContactFilter('');
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold flex-shrink-0"
+                      >
+                        + Tambah Filter
+                      </button>
+                    </div>
+
+                    {/* Chips Kontak yang Di-Whitelist */}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1 self-center mr-1">
+                        Daftar Terpantau:
+                      </span>
+                      {[...targets.map(t => t.name), ...extraFilterNames].map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="bg-white/10 text-slate-200 border border-white/15 px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1"
+                        >
+                          <Target className="w-2.5 h-2.5 text-fuchsia-400" />
+                          <span>{item}</span>
+                          {extraFilterNames.includes(item) && (
+                            <button
+                              onClick={() => setExtraFilterNames(prev => prev.filter(x => x !== item))}
+                              className="text-slate-400 hover:text-rose-400 ml-0.5"
+                            >
+                              &times;
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* LIVE DIAGNOSTIK KOTAK MONITOR REALTIME */}
+                <div className="bg-black/50 p-3 rounded-xl border border-white/10 space-y-2 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-400 font-semibold border-b border-white/10 pb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                      Diagnostik Layar WhatsApp Real-Time:
+                    </span>
+                    <button
+                      onClick={() => handleOpenNativeSetting('accessibility')}
+                      className="text-[10px] text-violet-400 hover:underline"
+                    >
+                      Buka Izin Aksesibilitas
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                    <div>
+                      <span className="text-slate-400">Layanan Aksesibilitas: </span>
+                      <strong className={nativePerms.accessibility ? 'text-emerald-400' : 'text-rose-400'}>
+                        {nativePerms.accessibility ? '✅ AKTIF (Bisa Baca Layar)' : '⚠️ NONAKTIF (Ketuk Buka Izin)'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400">Kontak di Layar WA: </span>
+                      <strong className="text-white">{diagnosticInfo.lastContact || '-'}</strong>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400">Status Filter: </span>
+                      <strong className={diagnosticInfo.lastFilterPassed ? 'text-emerald-400' : 'text-amber-400'}>
+                        {diagnosticInfo.lastFilterPassed ? '✅ Diterima & Diproses' : '🛑 Diabaikan (Bukan Target)'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400">Pesan Terakhir Ditangkap: </span>
+                      <span className="text-slate-300 italic truncate block">"{diagnosticInfo.lastMessage || 'Menunggu pesan...'}"</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

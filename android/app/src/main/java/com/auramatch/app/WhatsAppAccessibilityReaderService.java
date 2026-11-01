@@ -87,14 +87,23 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
     }
 
     private void extractActiveContactName(AccessibilityNodeInfo root) {
-        // WhatsApp contact name biasanya ada di ID 'conversation_contact_name'
-        for (String id : new String[]{"com.whatsapp:id/conversation_contact_name", "com.whatsapp:id/conversation_contact_status"}) {
+        String[] candidateIds = new String[]{
+            "com.whatsapp:id/conversation_contact_name",
+            "com.whatsapp:id/conversation_contact_status",
+            "com.whatsapp:id/action_bar_title",
+            "com.whatsapp:id/title",
+            "com.whatsapp:id/toolbar",
+            "com.whatsapp:id/chat_title"
+        };
+        for (String id : candidateIds) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
             if (nodes != null && !nodes.isEmpty()) {
-                CharSequence text = nodes.get(0).getText();
-                if (text != null && text.length() > 0) {
-                    activeChatTitle = text.toString();
-                    return;
+                for (AccessibilityNodeInfo node : nodes) {
+                    CharSequence text = node.getText();
+                    if (text != null && text.length() > 0 && !text.toString().equalsIgnoreCase("WhatsApp")) {
+                        activeChatTitle = text.toString().trim();
+                        return;
+                    }
                 }
             }
         }

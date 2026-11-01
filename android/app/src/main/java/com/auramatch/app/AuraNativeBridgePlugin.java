@@ -51,6 +51,78 @@ public class AuraNativeBridgePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setMonitorAllChats(PluginCall call) {
+        boolean allowAll = call.getBoolean("allowAll", false);
+        TargetWhitelistManager.setMonitorAll(getContext(), allowAll);
+        com.getcapacitor.JSObject ret = new com.getcapacitor.JSObject();
+        ret.put("monitorAll", allowAll);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getDiagnosticStatus(PluginCall call) {
+        Context context = getContext();
+        com.getcapacitor.JSObject ret = new com.getcapacitor.JSObject();
+        ret.put("lastContact", TargetWhitelistManager.getLastContact());
+        ret.put("lastMessage", TargetWhitelistManager.getLastMessage());
+        ret.put("lastTimestamp", TargetWhitelistManager.getLastTimestamp());
+        ret.put("lastFilterPassed", TargetWhitelistManager.getLastFilterPassed());
+        ret.put("monitorAll", TargetWhitelistManager.isMonitorAll());
+        ret.put("activeTargetsCount", TargetWhitelistManager.getActiveTargets().size());
+        ret.put("isAccessibilityEnabled", isAccessibilityServiceEnabled(context));
+        ret.put("isNotificationEnabled", isNotificationServiceEnabled(context));
+        ret.put("isBubbleRunning", FloatingWingmanService.isRunning());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void showNotification(PluginCall call) {
+        String title = call.getString("title", "🔮 AuraMatch Wingman");
+        String body = call.getString("body", "Waktu terbaik untuk mengirim pesan!");
+        Context context = getContext();
+
+        try {
+            android.app.NotificationManager notificationManager = 
+                (android.app.NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+
+            String channelId = "auramatch_channel";
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.app.NotificationChannel channel = new android.app.NotificationChannel(
+                    channelId,
+                    "AuraMatch Alerts",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Notifikasi Jam Emas dan Rekomendasi PDKT");
+                channel.enableVibration(true);
+                notificationManager.createNotificationChannel(channel);
+            }
+
+            Intent intent = new Intent(context, MainActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? android.app.PendingIntent.FLAG_IMMUTABLE : 0)
+            );
+
+            androidx.core.app.NotificationCompat.Builder builder = new androidx.core.app.NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(new androidx.core.app.NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent);
+
+            notificationManager.notify((int) System.currentTimeMillis(), builder.build());
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Gagal menampilkan notifikasi: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void checkPermissions(PluginCall call) {
         Context context = getContext();
 
