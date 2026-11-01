@@ -94,6 +94,7 @@ export default function App() {
   const [incomingChatInput, setIncomingChatInput] = useState('Hahaha iya nih, lagi capek bgt sama deadline kantor');
   const [analyzedChatResult, setAnalyzedChatResult] = useState(null);
   const [isWsConnected, setIsWsConnected] = useState(false);
+  const [connectedNumber, setConnectedNumber] = useState(null);
   const [wsQR, setWsQR] = useState(null);
   const [showQRModal, setShowQRModal] = useState(false);
 
@@ -178,7 +179,7 @@ export default function App() {
     }
   }, [incomingChatInput, targetWeton, numerologyData, personalDayData]);
 
-  // WebSocket Listener ke WhatsApp Server Lokal (port 4000)
+  // WebSocket & HTTP Fallback Polling ke WhatsApp Server Lokal (port 4000)
   useEffect(() => {
     let ws = null;
     try {
@@ -193,6 +194,7 @@ export default function App() {
             setWsQR(data.qr);
           } else if (data.type === 'status') {
             setIsWsConnected(data.isConnected);
+            if (data.userNumber) setConnectedNumber(data.userNumber);
             if (data.isConnected) setWsQR(null);
           } else if (data.type === 'new_message') {
             setIncomingChatInput(data.text);
@@ -209,8 +211,30 @@ export default function App() {
       setIsWsConnected(false);
     }
 
+    // Polling HTTP Fallback (Menembus blokir Mixed Content / HTTPS di Vercel)
+    const pollServer = async () => {
+      try {
+        const res = await fetch('http://localhost:4000/status');
+        if (res.ok) {
+          const data = await res.json();
+          setIsWsConnected(data.isConnected);
+          if (data.userNumber) setConnectedNumber(data.userNumber);
+          if (data.qr) setWsQR(data.qr);
+          if (data.lastIncomingMessage && data.lastIncomingMessage.text) {
+            setIncomingChatInput(data.lastIncomingMessage.text);
+          }
+        }
+      } catch {
+        // server offline
+      }
+    };
+
+    pollServer();
+    const pollInterval = setInterval(pollServer, 3000);
+
     return () => {
       if (ws) ws.close();
+      clearInterval(pollInterval);
     };
   }, []);
 
@@ -1020,15 +1044,26 @@ export default function App() {
                 </p>
 
                 {wsQR ? (
-                  <div className="flex justify-center p-3 bg-white rounded-2xl max-w-[220px] mx-auto shadow-lg">
-                    <img src={wsQR} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
+                  <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl max-w-[240px] mx-auto shadow-lg">
+                    <img src={wsQR} alt="WhatsApp QR Code" className="w-[200px] h-[200px] object-contain" />
+                    <span className="text-[10px] text-slate-700 font-semibold mt-1">Arahkan kamera WA ke sini</span>
                   </div>
                 ) : (
-                  <div className="bg-black/40 p-4 rounded-xl max-w-sm mx-auto border border-white/10 text-xs text-amber-300 space-y-1">
-                    <p>💡 <strong>Server WhatsApp Lokal Belum Dinyalakan:</strong></p>
-                    <p className="text-[10px] text-slate-400 font-mono">cd primbon-flirt-engine/whatsapp-server && npm start</p>
-                    <p className="text-[10px] text-slate-300 pt-1">
-                      (Anda tetap bisa menggunakan fitur analisis NLP canggih di bawah dengan mengetik/paste pesan target!)
+                  <div className="bg-black/40 p-4 rounded-xl max-w-sm mx-auto border border-white/10 text-xs text-amber-300 space-y-2">
+                    <p>💡 <strong>Server WhatsApp Lokal Sedang Berjalan:</strong></p>
+                    <p className="text-[11px] text-slate-200">
+                      Anda bisa membuka halaman scan langsung di browser laptop Anda:
+                    </p>
+                    <a
+                      href="http://localhost:4000/scan"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                    >
+                      Buka http://localhost:4000/scan
+                    </a>
+                    <p className="text-[10px] text-slate-400 pt-1">
+                      (Atau lihat QR Code yang tercetak langsung di jendela PowerShell Anda)
                     </p>
                   </div>
                 )}
