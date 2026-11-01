@@ -36,7 +36,14 @@ public class WhatsAppNotificationListener extends NotificationListenerService {
             return;
         }
 
-        Log.d(TAG, "Notifikasi WhatsApp Masuk: Dari [" + title + "]: " + text);
+        // FILTER PRIVASI KETAT:
+        // HANYA proses notifikasi jika pengirim terdaftar di CRM Gebetan!
+        // Semua pesan dari keluarga, rekan kerja, bos, grup, atau bank DIABAIKAN TOTAL.
+        if (!TargetWhitelistManager.isTarget(this, title)) {
+            return;
+        }
+
+        Log.d(TAG, "Notifikasi WhatsApp Terverifikasi Masuk: Dari [" + title + "]: " + text);
 
         // Kirim event langsung ke internal EventBus agar Webview Capacitor terupdate real-time
         WhatsAppMessageEventBus.postMessage(title, text, "target", System.currentTimeMillis());

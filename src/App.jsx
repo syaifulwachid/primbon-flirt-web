@@ -169,6 +169,14 @@ export default function App() {
     }
   }, []);
 
+  // Sinkronkan daftar nama target CRM ke modul Whitelist Filter Native Android
+  useEffect(() => {
+    if (Capacitor.isNativePlatform() && AuraNativeBridge) {
+      const targetNames = targets.map(t => t.name).filter(Boolean);
+      AuraNativeBridge.updateTargetWhitelist({ targets: targetNames }).catch(() => {});
+    }
+  }, [targets]);
+
   const handleOpenNativeSetting = async (type) => {
     if (AuraNativeBridge) {
       try {
@@ -1223,6 +1231,23 @@ export default function App() {
                       Buka Izin
                     </button>
                   )}
+                </div>
+              </div>
+
+              {/* Filter Privasi Khusus (Whitelist CRM) */}
+              <div className="bg-emerald-950/40 border border-emerald-500/30 p-3 rounded-xl flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div className="text-[11px] space-y-1">
+                  <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                    <span>Filter Privasi Khusus Aktif:</span>
+                    <span className="bg-emerald-500/20 px-2 py-0.5 rounded-full text-[10px] text-emerald-200">
+                      {targets.length} Target Terpantau
+                    </span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed">
+                    Sistem <strong>hanya memproses</strong> pesan dari: <strong className="text-white">{targets.map(t => t.name).join(', ')}</strong>.
+                    Chat keluarga, grup kantor, kerabat, dan pesan sensitif lainnya <strong>diblokir total</strong> dan diabaikan dari pembacaan.
+                  </p>
                 </div>
               </div>
             </div>

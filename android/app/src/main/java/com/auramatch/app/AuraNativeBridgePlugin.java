@@ -17,11 +17,11 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "AuraNativeBridge")
 public class AuraNativeBridgePlugin extends Plugin {
 
-    private boolean isBubbleRunning = false;
-
     @Override
     public void load() {
         super.load();
+
+        TargetWhitelistManager.init(getContext());
 
         // Daftarkan listener ke WhatsAppMessageEventBus agar event disalurkan ke JS
         WhatsAppMessageEventBus.registerListener((sender, text, role, timestamp) -> {
@@ -36,6 +36,21 @@ public class AuraNativeBridgePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void updateTargetWhitelist(PluginCall call) {
+        com.getcapacitor.JSArray arr = call.getArray("targets");
+        java.util.List<String> list = new java.util.ArrayList<>();
+        if (arr != null) {
+            try {
+                for (int i = 0; i < arr.length(); i++) {
+                    list.add(arr.getString(i));
+                }
+            } catch (Exception ignored) {}
+        }
+        TargetWhitelistManager.setTargets(getContext(), list);
+        call.resolve();
+    }
+
+    @PluginMethod
     public void checkPermissions(PluginCall call) {
         Context context = getContext();
 
@@ -47,7 +62,7 @@ public class AuraNativeBridgePlugin extends Plugin {
         res.put("notificationListener", hasNotification);
         res.put("overlay", hasOverlay);
         res.put("accessibility", hasAccessibility);
-        res.put("isBubbleRunning", isBubbleRunning);
+        res.put("isBubbleRunning", FloatingWingmanService.isRunning());
         call.resolve(res);
     }
 
@@ -86,20 +101,20 @@ public class AuraNativeBridgePlugin extends Plugin {
         Context context = getContext();
         Intent intent = new Intent(context, FloatingWingmanService.class);
 
-        if (isBubbleRunning) {
+        if (FloatingWingmanService.isRunning()) {
+            intent.setAction(FloatingWingmanService.ACTION_STOP);
             context.stopService(intent);
-            isBubbleRunning = false;
         } else {
+            intent.setAction(FloatingWingmanService.ACTION_SHOW);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent);
             } else {
                 context.startService(intent);
             }
-            isBubbleRunning = true;
         }
 
         JSObject res = new JSObject();
-        res.put("isBubbleRunning", isBubbleRunning);
+        res.put("isBubbleRunning", !FloatingWingmanService.isRunning());
         call.resolve(res);
     }
 
@@ -107,10 +122,10 @@ public class AuraNativeBridgePlugin extends Plugin {
     public void logUserReply(PluginCall call) {
         String text = call.getString("text", "");
         String sender = call.getString("sender", "Target");
-        
+
         // Broadcast outbound reply to EventBus
         WhatsAppMessageEventBus.postMessage(sender, text, "user", System.currentTimeMillis());
-        
+
         call.resolve();
     }
 
@@ -135,7 +150,7 @@ public class AuraNativeBridgePlugin extends Plugin {
         try {
             accessibilityEnabled = Settings.Secure.getInt(
                 context.getApplicationContext().getContentResolver(),
-                android.provider.Settings.Secure.ACCESSIBILITY_ENABLED);
+                Settings.Secure.ACCESSIBILITY_ENABLED);
         } catch (Settings.SettingNotFoundException ignored) {}
 
         TextUtils.SimpleStringSplitter mStringColonSplitter = new TextUtils.SimpleStringSplitter(':');

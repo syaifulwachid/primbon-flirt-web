@@ -1,9 +1,12 @@
 package com.auramatch.app;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.Intent;
+import android.os.Build;
+import android.provider.Settings;
+import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.util.Log;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -13,36 +16,73 @@ import java.util.Set;
  * (Pesan Masuk dari Gebetan DAN Pesan Keluar dari Pengguna).
  * 
  * Bekerja langsung di atas layar chat WhatsApp aktif untuk mendapatkan
- * konteks utuh (Full Two-Way Thread Context) tanpa perlu copy-paste.
+ * konteks utuh (Full Two-Way Thread Context) tanpa perlu copy-paste,
+ * serta menampilkan Gelembung Melayang (Floating Wingman) secara otomatis.
  */
 public class WhatsAppAccessibilityReaderService extends AccessibilityService {
 
     private static final String TAG = "AuraMatchAccessibility";
     private static final Set<String> processedMessages = new HashSet<>();
     private static String activeChatTitle = "Target";
+    private boolean isWhatsAppActive = false;
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
 
-        CharSequence packageName = event.getPackageName();
-        if (packageName == null || (!packageName.toString().contains("whatsapp"))) {
+        CharSequence packageNameChar = event.getPackageName();
+        if (packageNameChar == null) return;
+        String packageName = packageNameChar.toString();
+
+        boolean isWA = packageName.contains("whatsapp");
+
+        if (isWA) {
+            if (!isWhatsAppActive) {
+                isWhatsAppActive = true;
+                showFloatingBubble();
+            }
+
+            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+            if (rootNode == null) return;
+
+            try {
+                // 1. Ekstrak nama kontak aktif dari header WhatsApp jika ada
+                extractActiveContactName(rootNode);
+
+                // FILTER PRIVASI KETAT:
+                // HANYA pindai gelembung chat jika ruang obrolan yang dibuka adalah target CRM!
+                // Obrolan pribadi lain (teman, keluarga, grup kantor) diabaikan total.
+                if (!TargetWhitelistManager.isTarget(this, activeChatTitle)) {
+                    return;
+                }
+
+                // 2. Baca seluruh gelembung percakapan di layar
+                scanChatMessages(rootNode);
+            } catch (Exception e) {
+                Log.e(TAG, "Error saat membaca chat: " + e.getMessage());
+            } finally {
+                rootNode.recycle();
+            }
+        }
+    }
+
+    private void showFloatingBubble() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Izin overlay (canDrawOverlays) belum diberikan.");
             return;
         }
 
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode == null) return;
-
         try {
-            // 1. Ekstrak nama kontak aktif dari header WhatsApp jika ada
-            extractActiveContactName(rootNode);
-
-            // 2. Baca seluruh gelembung percakapan di layar
-            scanChatMessages(rootNode);
+            Intent intent = new Intent(this, FloatingWingmanService.class);
+            intent.setAction(FloatingWingmanService.ACTION_SHOW);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Log.d(TAG, "Gelembung melayang otomatis diaktifkan saat WhatsApp dibuka.");
         } catch (Exception e) {
-            Log.e(TAG, "Error saat membaca chat: " + e.getMessage());
-        } finally {
-            rootNode.recycle();
+            Log.e(TAG, "Gagal menjalankan FloatingWingmanService dari AccessibilityService: " + e.getMessage());
         }
     }
 
@@ -77,7 +117,6 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
                     processedMessages.add(key);
 
                     // Deteksi apakah pesan dari User (Outgoing) atau Target (Incoming)
-                    // Pesan keluar biasanya punya child/sibling ikon status pengiriman (status double check)
                     boolean isOutgoing = detectIfOutgoingMessage(node);
                     String role = isOutgoing ? "user" : "target";
 
@@ -114,8 +153,6 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
             if (statusNodes != null && !statusNodes.isEmpty()) {
                 return true; // Ada status icon -> Ini pesan keluar dari kita!
             }
-            List<AccessibilityNodeInfo> dateNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/date");
-            // Outgoing bubbles di WhatsApp umumnya align di sebelah kanan atau memiliki descriptor status
             if (parent.getContentDescription() != null && parent.getContentDescription().toString().toLowerCase().contains("anda")) {
                 return true;
             }
