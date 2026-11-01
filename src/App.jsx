@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, Heart, Clock, MessageSquare, ShieldAlert, 
   Send, Copy, Check, Flame, Moon, Sun, Wind, 
@@ -13,6 +13,7 @@ import { calculateWeton, calculateMatch, calculateDailyTiming, LAKUNING_MAP } fr
 import { CHAT_STAGES, SITUATION_MODES, getChatRecommendation, getGiftConsultation } from './engine/ronaldFrank';
 import { calculateNameNumerology, calculatePersonalDay } from './engine/numerology';
 import { analyzeIncomingMessage, analyzeConversationThread } from './engine/nlpCopilot';
+import { getGeminiUsage, generateGeminiSmartReplies } from './engine/geminiApi';
 
 const AuraNativeBridge = Capacitor.isNativePlatform() ? registerPlugin('AuraNativeBridge') : null;
 
@@ -86,8 +87,45 @@ export default function App() {
   const [notificationPermission, setNotificationPermission] = useState('default');
   const [notificationToast, setNotificationToast] = useState(null);
 
-  // Tab Nav: 'match' | 'numerology' | 'timing' | 'scripts' | 'wa_monitor' | 'playbook'
+  // Tab Nav: 'match' | 'numerology' | 'timing' | 'scripts' | 'wa_copilot' | 'playbook'
+  const TABS = ['match', 'numerology', 'timing', 'scripts', 'wa_copilot', 'playbook'];
   const [activeTab, setActiveTab] = useState('match');
+
+  // Swipe Gesture Handling untuk Pindah Tab dengan Menggeser Layar
+  const touchStartXRef = useRef(0);
+  const touchStartYRef = useRef(0);
+
+  const handleTouchStart = (e) => {
+    if (e.touches && e.touches.length > 0) {
+      touchStartXRef.current = e.touches[0].clientX;
+      touchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    if (!e.changedTouches || e.changedTouches.length === 0) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+
+    const deltaX = touchEndX - touchStartXRef.current;
+    const deltaY = touchEndY - touchStartYRef.current;
+
+    // Geser horizontal jika deltaX > deltaY & jarak geser > 40px
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 40) {
+      const currentIndex = TABS.indexOf(activeTab);
+      if (deltaX < 0) {
+        // Swipe Ke Kiri -> Tab Berikutnya
+        if (currentIndex < TABS.length - 1) {
+          setActiveTab(TABS[currentIndex + 1]);
+        }
+      } else {
+        // Swipe Ke Kanan -> Tab Sebelumnya
+        if (currentIndex > 0) {
+          setActiveTab(TABS[currentIndex - 1]);
+        }
+      }
+    }
+  };
 
   // Script Generator State
   const [selectedStage, setSelectedStage] = useState('opener');
@@ -125,6 +163,15 @@ export default function App() {
     accessibility: false,
     isBubbleRunning: false
   });
+
+  // Pengaturan Sumber AI & Gemini Free Tier
+  const [aiMode, setAiMode] = useState(() => localStorage.getItem('AURAMATCH_AI_MODE') || 'local');
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('AURAMATCH_GEMINI_KEY') || '');
+  const [geminiDailyLimit, setGeminiDailyLimit] = useState(() => Number(localStorage.getItem('AURAMATCH_GEMINI_LIMIT')) || 50);
+  const [geminiUsageCount, setGeminiUsageCount] = useState(() => getGeminiUsage());
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
+  const [geminiError, setGeminiError] = useState(null);
+  const [showAiSettings, setShowAiSettings] = useState(false);
 
   // Filter WhatsApp & Diagnostik Real-time
   const [monitorAllChats, setMonitorAllChats] = useState(false);
@@ -174,15 +221,20 @@ export default function App() {
         };
 
         setConversationHistory(prev => {
-          if (prev.length > 0 && prev[prev.length - 1].text === event.text.trim()) {
-            return prev;
+          // Hapus pesan template demo ('1', '2', '3') agar riwayat WhatsApp riil menggantikannya
+          const realMsgs = prev.filter(m => m.id !== '1' && m.id !== '2' && m.id !== '3');
+          if (realMsgs.length > 0 && realMsgs[realMsgs.length - 1].text === event.text.trim()) {
+            return realMsgs;
           }
-          return [...prev, newMsg];
+          return [...realMsgs, newMsg];
         });
 
         if (event.role !== 'user') {
           setIncomingChatInput(event.text.trim());
         }
+
+        setNotificationToast(`💬 Chat WA Terbaca dari ${event.sender || 'Target'}: "${event.text.trim().substring(0, 30)}..."`);
+        setTimeout(() => setNotificationToast(null), 3500);
       });
 
       return () => {
@@ -209,7 +261,7 @@ export default function App() {
     }
   }, [activeTab]);
 
-  // Sinkronkan daftar nama target CRM + Filter Tambahan ke modul Native Android
+  // Sinkronkan daftar nama target CRM + Alias WA + Filter Tambahan ke modul Native Android
   useEffect(() => {
     try {
       localStorage.setItem('AURAMATCH_EXTRA_FILTERS', JSON.stringify(extraFilterNames));
@@ -218,6 +270,7 @@ export default function App() {
     if (Capacitor.isNativePlatform() && AuraNativeBridge) {
       const targetNames = [
         ...targets.map(t => t.name).filter(Boolean),
+        ...targets.map(t => t.waName).filter(Boolean),
         ...extraFilterNames
       ];
       AuraNativeBridge.updateTargetWhitelist({ targets: targetNames }).catch(() => {});
@@ -356,13 +409,43 @@ export default function App() {
     } catch {}
   }, [conversationHistory, activeTargetId]);
 
-  // Evaluasi Utuh Dua Arah (Two-Way Context & Investment Ratio)
+  // Evaluasi Utuh Dua Arah (Two-Way Context & Investment Ratio) + Gemini Hybrid AI Support
   useEffect(() => {
     if (conversationHistory.length > 0 && targetWeton && numerologyData && personalDayData) {
-      const res = analyzeConversationThread(conversationHistory, targetWeton, numerologyData, personalDayData);
-      setThreadAnalysis(res);
+      const localRes = analyzeConversationThread(conversationHistory, targetWeton, numerologyData, personalDayData);
+      setThreadAnalysis(localRes);
+
+      // Jika Mode Hybrid Gemini AI diaktifkan dan API Key telah diisi
+      if (aiMode === 'hybrid_gemini' && geminiApiKey.trim()) {
+        const lastTargetMsg = [...conversationHistory].reverse().find(m => m.sender === 'target');
+        const activeMsg = lastTargetMsg ? lastTargetMsg.text : conversationHistory[conversationHistory.length - 1].text;
+
+        setIsGeminiLoading(true);
+        setGeminiError(null);
+
+        generateGeminiSmartReplies({
+          apiKey: geminiApiKey,
+          incomingMessage: activeMsg,
+          targetName: activeTarget.name,
+          targetWeton,
+          chatHistory: conversationHistory.slice(-6),
+          dailyLimit: geminiDailyLimit
+        }).then(geminiReplies => {
+          setGeminiUsageCount(getGeminiUsage());
+          setIsGeminiLoading(false);
+          setThreadAnalysis(prev => ({
+            ...prev,
+            replies: geminiReplies,
+            isGeminiPowered: true
+          }));
+        }).catch(err => {
+          setIsGeminiLoading(false);
+          setGeminiError(err.message);
+          console.warn('Gemini API Fallback to Local Engine:', err.message);
+        });
+      }
     }
-  }, [conversationHistory, targetWeton, numerologyData, personalDayData]);
+  }, [conversationHistory, targetWeton, numerologyData, personalDayData, aiMode, geminiApiKey, geminiDailyLimit]);
 
   // WebSocket & HTTP Fallback Polling ke WhatsApp Server Lokal (port 4000)
   useEffect(() => {
@@ -534,7 +617,11 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#090710] text-slate-100 flex flex-col selection:bg-fuchsia-600 selection:text-white pb-24 md:pb-12">
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      className="min-h-screen bg-[#090710] text-slate-100 flex flex-col selection:bg-fuchsia-600 selection:text-white pb-24 md:pb-12"
+    >
       {/* Background Ambient Glow */}
       <div className="fixed top-0 left-1/4 w-72 md:w-96 h-72 md:h-96 bg-fuchsia-600/10 rounded-full blur-3xl pointer-events-none -z-10" />
       <div className="fixed bottom-10 right-1/4 w-72 md:w-96 h-72 md:h-96 bg-violet-600/10 rounded-full blur-3xl pointer-events-none -z-10" />
@@ -1222,6 +1309,163 @@ export default function App() {
         {/* ================= TAB 5: WA COPILOT & TWO-WAY CONTEXT (UPGRADED!) ================= */}
         {activeTab === 'wa_copilot' && (
           <div className="space-y-4">
+            {/* PENGATURAN SUMBER REKOMENDASI AI (MODE INTERNAL LOKAL VS HIBRID GEMINI AI) */}
+            <div className="glass-panel p-4 rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-fuchsia-600/30 border border-fuchsia-500/40 flex items-center justify-center text-fuchsia-300 flex-shrink-0">
+                    <Cpu className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 flex-wrap">
+                      <span>Sumber Rekomendasi AI Copilot</span>
+                      {aiMode === 'hybrid_gemini' ? (
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-bold">
+                          🧠 Hibrid Gemini AI
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-fuchsia-500/20 text-fuchsia-300 px-2 py-0.5 rounded-full border border-fuchsia-500/30 font-bold">
+                          ⚡ Mode Internal (Lokal)
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[10px] text-slate-400">
+                      Pilih antara pemrosesan internal lokal (0ms) atau Hibrid AI Generatif (Google Gemini API)
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowAiSettings(!showAiSettings)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-slate-200 border border-white/10 transition-all flex items-center gap-1.5 self-start sm:self-auto shadow-sm"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>{showAiSettings ? 'Tutup Pengaturan' : 'Atur Sumber AI'}</span>
+                </button>
+              </div>
+
+              {showAiSettings && (
+                <div className="pt-3 border-t border-white/10 space-y-3">
+                  {/* SELEKSI DUA MODE */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <button
+                      onClick={() => {
+                        setAiMode('local');
+                        localStorage.setItem('AURAMATCH_AI_MODE', 'local');
+                      }}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        aiMode === 'local'
+                          ? 'bg-fuchsia-600/30 border-fuchsia-500 text-white font-bold shadow-md'
+                          : 'bg-black/30 border-white/10 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1 text-fuchsia-300 font-bold">
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Mode 1: Internal Lokal (Offline)</span>
+                      </div>
+                      <p className="text-[10px] font-normal text-slate-400 leading-tight">
+                        0ms Latensi, 100% Offline, Tanpa Kuota/API Key, Privasi Rahasia Maksimal di HP.
+                      </p>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setAiMode('hybrid_gemini');
+                        localStorage.setItem('AURAMATCH_AI_MODE', 'hybrid_gemini');
+                      }}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        aiMode === 'hybrid_gemini'
+                          ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold shadow-md'
+                          : 'bg-black/30 border-white/10 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1 text-emerald-300 font-bold">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Mode 2: Hibrid Gemini AI Agent</span>
+                      </div>
+                      <p className="text-[10px] font-normal text-slate-400 leading-tight">
+                        Menggunakan LLM Generatif Google Gemini API untuk kreasi kalimat unik bebas.
+                      </p>
+                    </button>
+                  </div>
+
+                  {/* CONFIGURASI API KEY & BATASAN FREE TIER */}
+                  {aiMode === 'hybrid_gemini' && (
+                    <div className="bg-black/40 p-3.5 rounded-xl border border-white/10 space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs flex-wrap gap-1">
+                          <label className="text-slate-300 font-semibold block">Google Gemini API Key</label>
+                          <a
+                            href="https://aistudio.google.com/app/apikey"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
+                          >
+                            <span>🔑 Ambil API Key Gratis di Google AI Studio</span>
+                            <ArrowRight className="w-2.5 h-2.5" />
+                          </a>
+                        </div>
+                        <input
+                          type="password"
+                          value={geminiApiKey}
+                          onChange={(e) => {
+                            setGeminiApiKey(e.target.value);
+                            localStorage.setItem('AURAMATCH_GEMINI_KEY', e.target.value);
+                          }}
+                          placeholder="Masukkan API Key Gemini (misal: AIzaSy...)"
+                          className="w-full bg-[#140f24] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      {/* FREE TIER USAGE COUNTER & RATE LIMITER */}
+                      <div className="bg-emerald-950/30 p-3 rounded-xl border border-emerald-500/20 text-[11px] space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-300 font-medium">Penggunaan Kuota Free Tier Hari Ini:</span>
+                          <strong className="text-emerald-300 font-bold text-xs">
+                            {geminiUsageCount} / {geminiDailyLimit} Panggilan API
+                          </strong>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="w-full h-1.5 bg-black/50 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              geminiUsageCount >= geminiDailyLimit ? 'bg-rose-500' : 'bg-emerald-400'
+                            }`}
+                            style={{ width: `${Math.min(100, (geminiUsageCount / geminiDailyLimit) * 100)}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                          <span>Batas Kuota Aman Harian (Max Free Tier):</span>
+                          <input
+                            type="number"
+                            value={geminiDailyLimit}
+                            onChange={(e) => {
+                              const val = Math.max(5, Number(e.target.value) || 50);
+                              setGeminiDailyLimit(val);
+                              localStorage.setItem('AURAMATCH_GEMINI_LIMIT', String(val));
+                            }}
+                            className="w-16 bg-[#140f24] border border-white/10 rounded px-1.5 py-0.5 text-right text-xs text-white"
+                          />
+                        </div>
+
+                        {geminiError && (
+                          <div className="p-2 rounded bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[10px] leading-tight">
+                            ⚠️ {geminiError} (Otomatis beralih ke Mode Lokal)
+                          </div>
+                        )}
+
+                        <p className="text-[9.5px] text-slate-400 italic leading-normal border-t border-white/5 pt-1.5">
+                          *Perlindungan Otomatis: Jika batas kuota harian tercapai, jaringan offline, atau API Key tidak valid, sistem secara otomatis beralih (fallback) ke Engine Lokal tanpa memutus layanan.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Panel Native Android Wingman (Dua Arah & Floating Bubble) */}
             <div className="glass-panel p-4 rounded-2xl border border-violet-500/30 bg-violet-950/20 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -1659,16 +1903,29 @@ export default function App() {
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                   <MessageSquare className="w-4 h-4 text-emerald-400" /> Riwayat Percakapan yang Terekam:
                 </h4>
-                <button
-                  onClick={() => {
-                    if (confirm('Bersihkan riwayat percakapan untuk target ini?')) {
-                      setConversationHistory([]);
-                    }
-                  }}
-                  className="text-[10px] text-slate-400 hover:text-rose-400 flex items-center gap-1"
-                >
-                  <Trash2 className="w-3 h-3" /> Reset Thread
-                </button>
+                <div className="flex items-center gap-2">
+                  {conversationHistory.some(m => m.id === '1' || m.id === '2' || m.id === '3') && (
+                    <button
+                      onClick={() => {
+                        setConversationHistory(prev => prev.filter(m => m.id !== '1' && m.id !== '2' && m.id !== '3'));
+                      }}
+                      className="px-2 py-0.5 rounded bg-fuchsia-600/30 hover:bg-fuchsia-600/50 text-fuchsia-300 text-[10px] font-semibold border border-fuchsia-500/40 transition-all flex items-center gap-1"
+                      title="Hapus data contoh awal"
+                    >
+                      <span>✨ Hapus Template Demo</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (confirm('Bersihkan riwayat percakapan untuk target ini?')) {
+                        setConversationHistory([]);
+                      }
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-rose-400 flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" /> Reset Thread
+                  </button>
+                </div>
               </div>
 
               {/* Chat Stream Bubble List */}
@@ -1759,8 +2016,24 @@ export default function App() {
             {/* HASIL ANALISA NLP & 3 REKOMENDASI BALASAN CERDAS */}
             {threadAnalysis && (
               <div className="space-y-3">
-                <h4 className="text-xs sm:text-sm font-bold text-white flex items-center justify-between">
-                  <span>3 Rekomendasi Balasan Memikat Berdasarkan Alur Chat</span>
+                <h4 className="text-xs sm:text-sm font-bold text-white flex items-center justify-between flex-wrap gap-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span>3 Rekomendasi Balasan Memikat</span>
+                    {threadAnalysis.isGeminiPowered ? (
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Sparkles className="w-2.5 h-2.5" /> Gemini AI
+                      </span>
+                    ) : (
+                      <span className="text-[9px] bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                        <Zap className="w-2.5 h-2.5" /> Engine Lokal
+                      </span>
+                    )}
+                    {isGeminiLoading && (
+                      <span className="text-[9px] text-amber-300 animate-pulse font-semibold">
+                        ⏳ Gemini AI meracik balasan...
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] text-slate-400 font-normal">Klik untuk salin & simpan</span>
                 </h4>
 

@@ -2,8 +2,10 @@ package com.auramatch.app;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -49,15 +51,9 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
                 // 1. Ekstrak nama kontak aktif dari header WhatsApp jika ada
                 extractActiveContactName(rootNode);
 
-                // FILTER PRIVASI KETAT:
-                // HANYA pindai gelembung chat jika ruang obrolan yang dibuka adalah target CRM!
-                // Obrolan pribadi lain (teman, keluarga, grup kantor) diabaikan total.
-                if (!TargetWhitelistManager.isTarget(this, activeChatTitle)) {
-                    return;
-                }
-
                 // 2. Baca seluruh gelembung percakapan di layar
-                scanChatMessages(rootNode);
+                int screenWidth = getScreenWidth();
+                scanChatMessages(rootNode, screenWidth);
             } catch (Exception e) {
                 Log.e(TAG, "Error saat membaca chat: " + e.getMessage());
             } finally {
@@ -109,65 +105,113 @@ public class WhatsAppAccessibilityReaderService extends AccessibilityService {
         }
     }
 
-    private void scanChatMessages(AccessibilityNodeInfo node) {
+    private void scanChatMessages(AccessibilityNodeInfo node, int screenWidth) {
         if (node == null) return;
 
-        // Cek apakah node adalah teks pesan (com.whatsapp:id/message_text)
         CharSequence viewId = node.getViewIdResourceName();
-        if (viewId != null && viewId.toString().contains("message_text")) {
-            CharSequence msgText = node.getText();
-            if (msgText != null && msgText.length() > 0) {
-                String content = msgText.toString().trim();
+        CharSequence className = node.getClassName();
+        CharSequence msgText = node.getText();
+
+        boolean isTextView = (className != null && className.toString().contains("TextView"));
+        boolean isMessageId = (viewId != null && (
+            viewId.toString().contains("message_text") ||
+            viewId.toString().contains("entry") ||
+            viewId.toString().contains("caption") ||
+            viewId.toString().contains("conversation_row")
+        ));
+
+        if ((isMessageId || isTextView) && msgText != null && msgText.length() > 0) {
+            String content = msgText.toString().trim();
+
+            if (isValidChatMessage(content)) {
                 String key = activeChatTitle + ":" + content;
 
                 if (!processedMessages.contains(key)) {
-                    // Batasi cache pesan yang sudah diproses agar tidak memory leak
                     if (processedMessages.size() > 500) processedMessages.clear();
                     processedMessages.add(key);
 
-                    // Deteksi apakah pesan dari User (Outgoing) atau Target (Incoming)
-                    boolean isOutgoing = detectIfOutgoingMessage(node);
+                    // Deteksi apakah pesan dari User (Outgoing/Kiri-Kanan) atau Target (Incoming)
+                    boolean isOutgoing = detectIfOutgoingMessage(node, screenWidth);
                     String role = isOutgoing ? "user" : "target";
 
                     Log.d(TAG, "Dua Arah Terdeteksi [" + role + "] (" + activeChatTitle + "): " + content);
 
-                    // Kirim ke Event Bus AuraMatch
-                    WhatsAppMessageEventBus.postMessage(
-                        activeChatTitle,
-                        content,
-                        role,
-                        System.currentTimeMillis()
-                    );
+                    // Catat ke TargetWhitelistManager & filter
+                    boolean passed = TargetWhitelistManager.isTarget(getApplicationContext(), activeChatTitle);
+                    if (passed) {
+                        TargetWhitelistManager.recordDetection(activeChatTitle, content, true);
+
+                        // Kirim ke Event Bus AuraMatch
+                        WhatsAppMessageEventBus.postMessage(
+                            activeChatTitle,
+                            content,
+                            role,
+                            System.currentTimeMillis()
+                        );
+                    }
                 }
             }
         }
 
         // Rekursif telusuri anak-anak node
-        for (int i = 0; i < node.getChildCount(); i++) {
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
             AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
-                scanChatMessages(child);
+                scanChatMessages(child, screenWidth);
                 child.recycle();
             }
         }
     }
 
-    private boolean detectIfOutgoingMessage(AccessibilityNodeInfo messageNode) {
-        // Cek parent container untuk mencari icon status pesan terkirim (double checkmark / clock)
-        AccessibilityNodeInfo parent = messageNode.getParent();
-        if (parent == null) return false;
+    private boolean isValidChatMessage(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        String t = text.trim();
+        if (t.length() < 1) return false;
+        // Abaikan format waktu seperti "14:02", "09.15", "10:30 AM"
+        if (t.matches("^\\d{1,2}[:.]\\d{2}(\\s?[APap][Mm])?$")) return false;
+        // Abaikan status umum UI
+        if (t.equalsIgnoreCase("online") || t.equalsIgnoreCase("typing...") || 
+            t.equalsIgnoreCase("ketik pesan") || t.equalsIgnoreCase("type a message") ||
+            t.equalsIgnoreCase("whatsapp") || t.equalsIgnoreCase("panggilan video") ||
+            t.equalsIgnoreCase("panggilan suara")) {
+            return false;
+        }
+        return true;
+    }
 
-        try {
-            List<AccessibilityNodeInfo> statusNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/status");
-            if (statusNodes != null && !statusNodes.isEmpty()) {
-                return true; // Ada status icon -> Ini pesan keluar dari kita!
+    private boolean detectIfOutgoingMessage(AccessibilityNodeInfo messageNode, int screenWidth) {
+        if (messageNode == null) return false;
+
+        // 1. Cek koordinat posisi balon chat di layar (Balon pesan keluar ada di sebelah kanan layar)
+        if (screenWidth > 0) {
+            Rect bounds = new Rect();
+            messageNode.getBoundsInScreen(bounds);
+            if (bounds.left > (screenWidth * 0.35)) {
+                return true; // Pesan di sebelah kanan -> Pesan keluar dari pengguna!
             }
-            if (parent.getContentDescription() != null && parent.getContentDescription().toString().toLowerCase().contains("anda")) {
-                return true;
-            }
-        } catch (Exception ignored) {}
-        
+        }
+
+        // 2. Fallback cek parent container untuk icon status pengiriman
+        AccessibilityNodeInfo parent = messageNode.getParent();
+        if (parent != null) {
+            try {
+                List<AccessibilityNodeInfo> statusNodes = parent.findAccessibilityNodeInfosByViewId("com.whatsapp:id/status");
+                if (statusNodes != null && !statusNodes.isEmpty()) {
+                    return true;
+                }
+                if (parent.getContentDescription() != null && parent.getContentDescription().toString().toLowerCase().contains("anda")) {
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+
         return false;
+    }
+
+    private int getScreenWidth() {
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        return metrics.widthPixels;
     }
 
     @Override

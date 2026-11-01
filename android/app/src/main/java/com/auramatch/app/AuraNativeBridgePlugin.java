@@ -25,13 +25,16 @@ public class AuraNativeBridgePlugin extends Plugin {
 
         // Daftarkan listener ke WhatsAppMessageEventBus agar event disalurkan ke JS
         WhatsAppMessageEventBus.registerListener((sender, text, role, timestamp) -> {
-            JSObject ret = new JSObject();
-            ret.put("sender", sender);
-            ret.put("text", text);
-            ret.put("role", role); // "target" (inbound) atau "user" (outbound)
-            ret.put("timestamp", timestamp);
+            boolean passed = TargetWhitelistManager.isTarget(getContext(), sender);
+            if (passed) {
+                JSObject ret = new JSObject();
+                ret.put("sender", sender);
+                ret.put("text", text);
+                ret.put("role", role); // "target" (inbound) atau "user" (outbound)
+                ret.put("timestamp", timestamp);
 
-            notifyListeners("onWhatsAppChatEvent", ret);
+                notifyListeners("onWhatsAppChatEvent", ret);
+            }
         });
     }
 
