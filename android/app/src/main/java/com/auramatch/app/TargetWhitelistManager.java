@@ -2,6 +2,7 @@ package com.auramatch.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -9,9 +10,7 @@ import java.util.Set;
 
 /**
  * Pengelola Whitelist Target Obrolan (Privacy & Filter Engine).
- * Mendukung 2 mode:
- * 1. Mode Whitelist (Default): HANYA memantau nama kontak tertentu yang dimasukkan pengguna.
- * 2. Mode Pantau Chat Aktif: Membaca chat siapapun yang sedang dibuka pengguna di layar WhatsApp.
+ * Mendukung pemetaan manual kontak WhatsApp ke profil target CRM.
  */
 public class TargetWhitelistManager {
 
@@ -26,6 +25,9 @@ public class TargetWhitelistManager {
     private static String lastDetectedMessage = "-";
     private static long lastDetectedTimestamp = 0;
     private static boolean lastFilterPassed = false;
+
+    // Daftar kontak WhatsApp yang baru-baru ini muncul di layar atau notifikasi
+    private static final List<String> recentDiscoveredContacts = Collections.synchronizedList(new ArrayList<>());
 
     public static void init(Context context) {
         if (context == null) return;
@@ -73,7 +75,19 @@ public class TargetWhitelistManager {
     }
 
     public static void recordDetection(String contact, String message, boolean passed) {
-        lastDetectedContact = (contact != null) ? contact : "-";
+        if (contact != null && !contact.trim().isEmpty() && !contact.equalsIgnoreCase("WhatsApp")) {
+            String clean = contact.trim();
+            lastDetectedContact = clean;
+
+            // Tambahkan ke daftar kontak terdeteksi (maksimal 10 kontak terakhir)
+            synchronized (recentDiscoveredContacts) {
+                recentDiscoveredContacts.remove(clean);
+                recentDiscoveredContacts.add(0, clean);
+                if (recentDiscoveredContacts.size() > 10) {
+                    recentDiscoveredContacts.remove(recentDiscoveredContacts.size() - 1);
+                }
+            }
+        }
         lastDetectedMessage = (message != null) ? message : "-";
         lastDetectedTimestamp = System.currentTimeMillis();
         lastFilterPassed = passed;
@@ -83,6 +97,9 @@ public class TargetWhitelistManager {
     public static String getLastMessage() { return lastDetectedMessage; }
     public static long getLastTimestamp() { return lastDetectedTimestamp; }
     public static boolean getLastFilterPassed() { return lastFilterPassed; }
+    public static List<String> getRecentContacts() {
+        return new ArrayList<>(recentDiscoveredContacts);
+    }
 
     /**
      * Memeriksa apakah kontak diizinkan untuk diproses.
@@ -109,7 +126,7 @@ public class TargetWhitelistManager {
             return true;
         }
 
-        // 3. Mode Whitelist: Cocokkan dengan nama target yang terdaftar
+        // 3. Mode Whitelist: Cocokkan dengan nama target / alias kontak WhatsApp yang terdaftar
         String lower = contactName.trim().toLowerCase();
         for (String target : cachedTargets) {
             if (lower.contains(target) || target.contains(lower)) {

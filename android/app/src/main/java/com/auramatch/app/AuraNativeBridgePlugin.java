@@ -72,6 +72,13 @@ public class AuraNativeBridgePlugin extends Plugin {
         ret.put("isAccessibilityEnabled", isAccessibilityServiceEnabled(context));
         ret.put("isNotificationEnabled", isNotificationServiceEnabled(context));
         ret.put("isBubbleRunning", FloatingWingmanService.isRunning());
+
+        com.getcapacitor.JSArray recentArr = new com.getcapacitor.JSArray();
+        for (String c : TargetWhitelistManager.getRecentContacts()) {
+            recentArr.put(c);
+        }
+        ret.put("recentContacts", recentArr);
+
         call.resolve(ret);
     }
 

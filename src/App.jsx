@@ -80,6 +80,7 @@ export default function App() {
   const [newTargetDate, setNewTargetDate] = useState('2001-01-01');
   const [newTargetStatus, setNewTargetStatus] = useState('Baru Kenal');
   const [newTargetNotes, setNewTargetNotes] = useState('');
+  const [newTargetWaName, setNewTargetWaName] = useState('');
 
   // Notification State
   const [notificationPermission, setNotificationPermission] = useState('default');
@@ -437,6 +438,7 @@ export default function App() {
     const newTarget = {
       id: `target-${Date.now()}`,
       name: newTargetName.trim(),
+      waName: newTargetWaName.trim() || newTargetName.trim(),
       birthDate: newTargetDate,
       pdktStatus: newTargetStatus,
       notes: newTargetNotes
@@ -446,7 +448,22 @@ export default function App() {
     setActiveTargetId(newTarget.id);
     setIsAddModalOpen(false);
     setNewTargetName('');
+    setNewTargetWaName('');
     setNewTargetNotes('');
+  };
+
+  // Tautkan kontak WhatsApp tertentu ke target aktif
+  const handleUpdateTargetWaName = (newName) => {
+    if (!newName) return;
+    const clean = newName.trim();
+    setTargets(prev => prev.map(t => {
+      if (t.id === activeTargetId) {
+        return { ...t, waName: clean };
+      }
+      return t;
+    }));
+    setNotificationToast(`Obrolan WhatsApp "${clean}" berhasil ditautkan ke ${activeTarget.name}!`);
+    setTimeout(() => setNotificationToast(null), 3500);
   };
 
   // Hapus Target
@@ -1440,6 +1457,66 @@ export default function App() {
                       <span className="text-slate-300 italic truncate block">"{diagnosticInfo.lastMessage || 'Menunggu pesan...'}"</span>
                     </div>
                   </div>
+
+                  {/* ONE-TAP PAIR TOMBOL CEPAT */}
+                  {diagnosticInfo.lastContact && diagnosticInfo.lastContact !== '-' && diagnosticInfo.lastContact !== (activeTarget.waName || activeTarget.name) && (
+                    <div className="pt-2 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-fuchsia-950/40 p-2.5 rounded-lg border border-fuchsia-500/40">
+                      <div className="text-[10px]">
+                        <span className="text-slate-300 block">Obrolan WhatsApp Aktif di Layar:</span>
+                        <strong className="text-fuchsia-300 text-xs font-bold">"{diagnosticInfo.lastContact}"</strong>
+                      </div>
+                      <button
+                        onClick={() => handleUpdateTargetWaName(diagnosticInfo.lastContact)}
+                        className="px-3 py-1.5 bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500 text-white font-bold rounded-lg text-[10px] shadow flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <span>🔗 Tautkan ke {activeTarget.name}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* DAFTAR PILIHAN OBROLAN WHATSAPP TERDETEKSI (CHAT PICKER) */}
+                  {diagnosticInfo.recentContacts && diagnosticInfo.recentContacts.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-white/10">
+                      <span className="text-[10px] text-slate-400 block font-semibold">
+                        Pilih manual dari riwayat chat WhatsApp yang baru Anda buka:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {diagnosticInfo.recentContacts.map((contact, cIdx) => (
+                          <button
+                            key={cIdx}
+                            onClick={() => handleUpdateTargetWaName(contact)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] flex items-center gap-1 border transition-all ${
+                              (activeTarget.waName || activeTarget.name) === contact
+                                ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 font-bold'
+                                : 'bg-white/5 hover:bg-white/15 text-slate-300 border-white/10'
+                            }`}
+                          >
+                            <span>💬 {contact}</span>
+                            {(activeTarget.waName || activeTarget.name) === contact ? (
+                              <span className="text-[9px] text-emerald-400 font-bold">✓ Terhubung</span>
+                            ) : (
+                              <span className="text-[9px] text-violet-300">+ Pilih</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* PEMETAAN NAMA TARGET KE WHATSAPP */}
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Profil Target Terpilih:</span>
+                    <strong className="text-white text-xs">{activeTarget.name}</strong>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400">Nama Kontak di WA:</span>
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold text-[11px]">
+                      {activeTarget.waName || activeTarget.name}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1821,6 +1898,19 @@ export default function App() {
                   value={newTargetName}
                   onChange={(e) => setNewTargetName(e.target.value)}
                   placeholder="Misal: Nadia Safira"
+                  className="w-full bg-[#140f24] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-fuchsia-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 block mb-1">
+                  Nama Kontak di WhatsApp <span className="text-[10px] text-slate-400">(Opsional jika beda panggilan di WA)</span>
+                </label>
+                <input
+                  type="text"
+                  value={newTargetWaName}
+                  onChange={(e) => setNewTargetWaName(e.target.value)}
+                  placeholder="Misal: Ayang, Nadia Kantor, atau nomor HP"
                   className="w-full bg-[#140f24] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-fuchsia-500"
                 />
               </div>
